@@ -18,7 +18,7 @@ ANYKERNEL_DIR="$WORK_DIR/AnyKernel_Base"
 RELEASE_DIR="$WORK_DIR/releases"
 DEVICE="beyond2lte"
 KERNEL_VER="v1.0"
-ZIP_NAME="Laksanasoft-Enterprise-${DEVICE}-${KERNEL_VER}-KernelSU-Next-NetHunter-Anykernel3.zip"
+ZIP_NAME="Laksanasoft-Enterprise-${DEVICE}-${KERNEL_VER}-Polly-KernelSU-Next-NetHunter-Anykernel3.zip"
 
 mkdir -p "$RELEASE_DIR" "$OUT_DIR"
 
@@ -53,7 +53,11 @@ export KBUILD_BUILD_USER="MuhammadFikri"
 export KBUILD_BUILD_HOST="Laksanasoft-Enterprise"
 export KCFLAGS="-Wno-error -Wno-misleading-indentation"
 
-if [ -d "$WORK_DIR/toolchain/bin" ]; then
+CLANG_BIN=$(find "$WORK_DIR/toolchain" -name "clang" -type f -perm /111 2>/dev/null | head -n 1)
+if [ -n "$CLANG_BIN" ]; then
+    TOOLCHAIN_BIN=$(dirname "$CLANG_BIN")
+    export PATH="$TOOLCHAIN_BIN:$PATH"
+elif [ -d "$WORK_DIR/toolchain/bin" ]; then
     export PATH="$WORK_DIR/toolchain/bin:$PATH"
 fi
 
@@ -85,7 +89,7 @@ else
 fi
 
 # 4. Inject Missing Hardware Flashing & Microcontroller Drivers
-echo "[*] Injecting technician USB drivers..."
+echo "[*] Injecting technician USB drivers and LLVM Polly..."
 "$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_USB_SERIAL
 "$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_USB_SERIAL_CONSOLE
 "$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_USB_SERIAL_GENERIC
@@ -100,8 +104,8 @@ echo "[*] Injecting technician USB drivers..."
 "$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_USB_ACM
 "$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_RT2X00
 "$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_RT2800USB
-"$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --disable CONFIG_LLVM_POLLY
-"$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --set-str CONFIG_LOCALVERSION "-⚡️Laksanasoft-Enterprise-${KERNEL_VER}⚡️+"
+"$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_LLVM_POLLY
+"$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --set-str CONFIG_LOCALVERSION "-⚡️Laksanasoft-Enterprise-${KERNEL_VER}-Polly⚡️+"
 
 # Ensure KSU and SuSFS stay enabled as on the running phone
 "$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_KSU
@@ -132,7 +136,7 @@ rm -f "$ANYKERNEL_DIR/Image" "$ANYKERNEL_DIR"/*.zip
 cp "$IMAGE_PATH" "$ANYKERNEL_DIR/Image"
 
 # Set enterprise branding in anykernel.sh
-sed -i 's/kernel.string=.*/kernel.string=⚡️ Laksanasoft Enterprise Kernel for Galaxy S10+ (beyond2lte) ⚡️/g' "$ANYKERNEL_DIR/anykernel.sh"
+sed -i 's/kernel.string=.*/kernel.string=⚡️ Laksanasoft Enterprise Kernel (Polly Edition) for Galaxy S10+ (beyond2lte) ⚡️/g' "$ANYKERNEL_DIR/anykernel.sh"
 sed -i 's/device.name1=.*/device.name1=beyond2lte/g' "$ANYKERNEL_DIR/anykernel.sh"
 
 chmod -R +x "$ANYKERNEL_DIR/tools"

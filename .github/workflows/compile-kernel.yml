@@ -33,10 +33,13 @@ jobs:
             gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
             binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
-      - name: Download Proton Clang Toolchain
+      - name: Download ZyC Clang 23 Toolchain (Native Polly Support)
         run: |
-          echo "[*] Cloning Proton-Clang toolchain..."
-          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchain
+          echo "[*] Downloading ZyC Clang 23 with native LLVM Polly..."
+          mkdir -p toolchain
+          wget -q -O clang.tar.gz https://github.com/ZyCromerZ/Clang/releases/download/23.0.0git-20260130-release/Clang-23.0.0git-20260130.tar.gz
+          tar -xzf clang.tar.gz -C toolchain
+          rm -f clang.tar.gz
 
       - name: Build Laksanasoft Enterprise Kernel
         run: |
@@ -46,7 +49,7 @@ jobs:
       - name: Upload Kernel Zip Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Laksanasoft-Enterprise-beyond2lte-Kernel
+          name: Laksanasoft-Enterprise-beyond2lte-Kernel-Polly
           path: releases/*.zip
           if-no-files-found: error
           retention-days: 30
@@ -57,14 +60,15 @@ jobs:
         run: |
           ZIP_FILE=$(ls releases/*.zip | head -n 1)
           ZIP_NAME=$(basename "$ZIP_FILE")
-          TAG="v1.0"
+          TAG="v1.0-polly"
           
           cat << 'EOF' > release_notes.md
-          ## ⚡ Laksanasoft Enterprise Kernel for Samsung Galaxy S10+ (beyond2lte)
+          ## ⚡ Laksanasoft Enterprise Kernel (Polly Edition) for Samsung Galaxy S10+ (beyond2lte)
           
-          ### 🚀 Fitur & Driver Lengkap Teknisi:
+          ### 🚀 Fitur & Driver Lengkap Teknisi + Optimasi LLVM Polly:
           - **SoC**: Samsung Exynos 9820 (Kernel Linux 4.14.356)
-          - **Brand**: Laksanasoft Enterprise Edition
+          - **Compiler**: ZyC Clang 23.0.0git + LLVM Polly Native Loop Optimizer
+          - **Brand**: Laksanasoft Enterprise Edition (Polly)
           - **Root & Stealth**: KernelSU-Next v3.3.0 + SuSFS v2.2.0
           - **USB Serial / Hardware Hacking**:
             - WCH CH340 / CH341 (Arduino & USB-TTL murah)
@@ -88,7 +92,7 @@ jobs:
             - RNDIS USB Ethernet
           
           ### 📦 Cara Flash:
-          1. Masuk ke TWRP Recovery atau gunakan aplikasi KernelSU / AnyKernel3 installer.
+          1. Masuk ke TWRP Recovery.
           2. Flash file zip AnyKernel3.
           3. Reboot sistem.
           EOF
@@ -97,5 +101,5 @@ jobs:
           
           echo "[*] Publishing GitHub Release $TAG..."
           gh release create "$TAG" "$ZIP_FILE" \
-            --title "⚡ Laksanasoft Enterprise Kernel $TAG (beyond2lte)" \
+            --title "⚡ Laksanasoft Enterprise Kernel $TAG (Polly Edition - beyond2lte)" \
             --notes-file release_notes.md
