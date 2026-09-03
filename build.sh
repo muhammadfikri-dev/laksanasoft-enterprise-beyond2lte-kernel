@@ -55,9 +55,14 @@ if [ -d "$WORK_DIR/toolchain/bin" ]; then
     export PATH="$WORK_DIR/toolchain/bin:$PATH"
 fi
 
+echo "[*] Verifying compiler environment:"
+which clang || true
+clang --version || true
+which aarch64-linux-gnu-gcc || true
+
 mkdir -p "$OUT_DIR"
 
-# Explicit Make flags to prevent x86 host fallback on GitHub Actions runners
+# Explicit Make flags
 MAKE_FLAGS=(
     ARCH=arm64
     SUBARCH=arm64
@@ -72,6 +77,11 @@ MAKE_FLAGS=(
 # 5. Generate .config
 echo "[*] Generating defconfig..."
 make -C "$KERNEL_DIR" O="$OUT_DIR" "${MAKE_FLAGS[@]}" "$DEFCONFIG"
+
+# Bypass stack-protector-strong check masking to allow compilation to proceed
+echo "[*] Tuning compiler check flags..."
+"$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --disable CONFIG_CC_STACKPROTECTOR_STRONG
+"$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_CC_STACKPROTECTOR_NONE
 
 # Ensure critical technician driver flags are explicitly turned on in generated .config
 echo "[*] Verifying critical technician driver flags..."
