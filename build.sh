@@ -57,9 +57,21 @@ fi
 
 mkdir -p "$OUT_DIR"
 
+# Explicit Make flags to prevent x86 host fallback on GitHub Actions runners
+MAKE_FLAGS=(
+    ARCH=arm64
+    SUBARCH=arm64
+    CC=clang
+    CROSS_COMPILE=aarch64-linux-gnu-
+    CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+    CLANG_TRIPLE=aarch64-linux-gnu-
+    LLVM=1
+    LLVM_IAS=1
+)
+
 # 5. Generate .config
 echo "[*] Generating defconfig..."
-make -C "$KERNEL_DIR" O="$OUT_DIR" "$DEFCONFIG" LLVM=1
+make -C "$KERNEL_DIR" O="$OUT_DIR" "${MAKE_FLAGS[@]}" "$DEFCONFIG"
 
 # Ensure critical technician driver flags are explicitly turned on in generated .config
 echo "[*] Verifying critical technician driver flags..."
@@ -79,12 +91,12 @@ echo "[*] Verifying critical technician driver flags..."
 "$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --set-str CONFIG_LOCALVERSION "-⚡️Laksanasoft-Enterprise-${KERNEL_VER}⚡️+"
 
 # Apply olddefconfig to resolve any dependencies
-make -C "$KERNEL_DIR" O="$OUT_DIR" olddefconfig LLVM=1
+make -C "$KERNEL_DIR" O="$OUT_DIR" "${MAKE_FLAGS[@]}" olddefconfig
 
 # 6. Compile Kernel
 echo "[*] Starting compilation with $(nproc) cores..."
 BUILD_START=$(date +%s)
-make -C "$KERNEL_DIR" O="$OUT_DIR" -j"$(nproc)" LLVM=1
+make -C "$KERNEL_DIR" O="$OUT_DIR" "${MAKE_FLAGS[@]}" -j"$(nproc)"
 BUILD_END=$(date +%s)
 
 IMAGE_PATH="$OUT_DIR/arch/arm64/boot/Image"

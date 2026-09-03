@@ -29,7 +29,9 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y --no-install-recommends \
             build-essential bc bison flex libssl-dev libelf-dev libncurses5-dev \
-            zip unzip curl wget git ca-certificates libarchive-tools xz-utils
+            zip unzip curl wget git ca-certificates libarchive-tools xz-utils \
+            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
+            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
 
       - name: Download Proton Clang Toolchain
         run: |
