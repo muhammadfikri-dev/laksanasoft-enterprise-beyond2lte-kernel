@@ -1,0 +1,100 @@
+name: Build Laksanasoft Enterprise Kernel
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Compile Enterprise Kernel (beyond2lte)
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Free Disk Space
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libssl-dev libelf-dev libncurses5-dev \
+            zip unzip curl wget git ca-certificates libarchive-tools xz-utils
+
+      - name: Download Proton Clang Toolchain
+        run: |
+          echo "[*] Cloning Proton-Clang toolchain..."
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchain
+
+      - name: Build Laksanasoft Enterprise Kernel
+        run: |
+          chmod +x build.sh scripts/apply_drivers.sh
+          ./build.sh
+
+      - name: Upload Kernel Zip Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Laksanasoft-Enterprise-beyond2lte-Kernel
+          path: releases/*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish Automated GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ZIP_FILE=$(ls releases/*.zip | head -n 1)
+          ZIP_NAME=$(basename "$ZIP_FILE")
+          TAG="v1.0"
+          
+          # Delete existing release/tag if already present
+          gh release delete "$TAG" --yes --cleanup-tag || true
+          
+          echo "[*] Publishing GitHub Release $TAG..."
+          gh release create "$TAG" "$ZIP_FILE" \
+            --title "⚡ Laksanasoft Enterprise Kernel $TAG (beyond2lte)" \
+            --notes "## ⚡ Laksanasoft Enterprise Kernel for Samsung Galaxy S10+ (beyond2lte)
+            
+### 🚀 Fitur & Driver Lengkap Teknisi:
+- **SoC**: Samsung Exynos 9820 (Kernel Linux 4.14.356)
+- **Brand**: Laksanasoft Enterprise
+- **Root & Stealth**: KernelSU-Next v3.3.0 + SuSFS v2.2.0
+- **USB Serial / Hardware Hacking**:
+  - WCH CH340 / CH341 (Arduino & USB-TTL murah)
+  - Silicon Labs CP2102 / CP2104 (ESP32 / NodeMCU)
+  - FTDI FT232R
+  - Prolific PL2303
+  - Qualcomm Diag Mode (900E / 901D serial ports)
+  - USB CDC-ACM (Proxmark3, Flipper Zero, Teensy)
+- **Smartphone Flashing Support**:
+  - Android Fastboot, MediaTek BROM (mtkclient), Qualcomm EDL 9008, Samsung Download Mode
+  - Apple iOS Normal, Recovery Mode, dan DFU Mode (idevicerestore, usbmuxd, checkra1n, palera1n)
+- **Wi-Fi Packet Injection & Monitor Mode**:
+  - Atheros AR9271 (ath9k_htc), AR9170 (carl9170)
+  - Realtek RTL8812AU / RTL8814AU (88xxau - Dual Band)
+  - Realtek RTL8187L, RTL8xxxu
+  - Ralink RT2800USB / RT3070 / RT5370 (rt2x00 aktif!)
+  - MediaTek MT7601U
+- **USB Arsenal & NetHunter**:
+  - BadUSB HID keyboard/mouse emulation
+  - USB Mass Storage (ISO bootable CD-ROM)
+  - RNDIS USB Ethernet
+
+### 📦 Cara Flash:
+1. Masuk ke TWRP Recovery atau gunakan aplikasi KernelSU / AnyKernel3 installer.
+2. Flash file zip: \`$ZIP_NAME\`.
+3. Reboot sistem."
