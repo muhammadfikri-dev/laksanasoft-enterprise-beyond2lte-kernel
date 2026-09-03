@@ -78,10 +78,12 @@ MAKE_FLAGS=(
 echo "[*] Generating defconfig..."
 make -C "$KERNEL_DIR" O="$OUT_DIR" "${MAKE_FLAGS[@]}" "$DEFCONFIG"
 
-# Bypass stack-protector-strong check masking to allow compilation to proceed
-echo "[*] Tuning compiler check flags..."
-"$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --disable CONFIG_CC_STACKPROTECTOR_STRONG
-"$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_CC_STACKPROTECTOR_NONE
+# Disable CONFIG_LLVM_POLLY (causes unknown argument -polly-reschedule=1 error on Clang)
+echo "[*] Disabling broken CONFIG_LLVM_POLLY flags..."
+"$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --disable CONFIG_LLVM_POLLY
+
+# Re-enable stack protector strong
+"$KERNEL_DIR/scripts/config" --file "$OUT_DIR/.config" --enable CONFIG_CC_STACKPROTECTOR_STRONG
 
 # Ensure critical technician driver flags are explicitly turned on in generated .config
 echo "[*] Verifying critical technician driver flags..."

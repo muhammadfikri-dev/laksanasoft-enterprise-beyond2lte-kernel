@@ -28,7 +28,11 @@ echo "================================================================="
 sed -i 's/CONFIG_LOCALVERSION=.*/CONFIG_LOCALVERSION="-⚡️Laksanasoft-Enterprise-v1.0⚡️+"/g' "$DEFCONFIG"
 echo "[+] Updated CONFIG_LOCALVERSION to '-⚡️Laksanasoft-Enterprise-v1.0⚡️+'"
 
-# 2. Append Driver Configurations
+# 2. Disable broken LLVM_POLLY flags (-polly-reschedule=1, -polly-loopfusion-greedy=1)
+sed -i 's/CONFIG_LLVM_POLLY=y/# CONFIG_LLVM_POLLY is not set/g' "$DEFCONFIG"
+echo "[+] Disabled CONFIG_LLVM_POLLY to eliminate deprecated Clang command line argument errors"
+
+# 3. Append Driver Configurations
 if [ -f "$CONFIG_FRAGMENT" ]; then
     echo "[+] Merging driver configurations from $CONFIG_FRAGMENT..."
     cat "$CONFIG_FRAGMENT" >> "$DEFCONFIG"
@@ -36,5 +40,4 @@ else
     echo "[-] Warning: Fragment file $CONFIG_FRAGMENT not found, skipping merge."
 fi
 
-# 3. Clean up any duplicate keys
 echo "[+] Defconfig prepared successfully."
