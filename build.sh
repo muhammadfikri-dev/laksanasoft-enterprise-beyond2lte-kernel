@@ -33,14 +33,16 @@ echo "================================================================="
 if [ ! -d "$KERNEL_DIR" ]; then
     echo "[*] Cloning kernel source repository (branch: $KERNEL_BRANCH)..."
     git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_SRC" "$KERNEL_DIR"
-    echo "[*] Initializing KernelSU-Next submodule..."
+    echo "[*] Initializing KernelSU-Next submodule (branch: legacy-susfs-v2)..."
     cd "$KERNEL_DIR"
     git submodule update --init --recursive --depth 1 || true
-    if [ ! -f "$KERNEL_DIR/KernelSU-Next/kernel/Kconfig" ]; then
-        echo "[*] Direct cloning KernelSU-Next..."
+    if [ ! -f "$KERNEL_DIR/KernelSU-Next/kernel/Kconfig" ] || [ ! -f "$KERNEL_DIR/KernelSU-Next/kernel/Makefile" ]; then
+        echo "[*] Cloning KernelSU-Next (branch: legacy-susfs-v2)..."
         rm -rf "$KERNEL_DIR/KernelSU-Next"
-        git clone --depth=1 https://github.com/sidex15/KernelSU-Next.git "$KERNEL_DIR/KernelSU-Next"
+        git clone --depth=1 -b legacy-susfs-v2 https://github.com/sidex15/KernelSU-Next.git "$KERNEL_DIR/KernelSU-Next"
     fi
+    # Strip any strict -Werror from KernelSU build files
+    find "$KERNEL_DIR/KernelSU-Next" -type f \( -name "Kbuild" -o -name "Makefile" \) -exec sed -i 's/-Werror//g' {} + 2>/dev/null || true
     cd "$WORK_DIR"
 fi
 
@@ -49,6 +51,7 @@ export ARCH=arm64
 export SUBARCH=arm64
 export KBUILD_BUILD_USER="MuhammadFikri"
 export KBUILD_BUILD_HOST="Laksanasoft-Enterprise"
+export KCFLAGS="-Wno-error -Wno-misleading-indentation"
 
 if [ -d "$WORK_DIR/toolchain/bin" ]; then
     export PATH="$WORK_DIR/toolchain/bin:$PATH"
@@ -68,6 +71,7 @@ MAKE_FLAGS=(
     CLANG_TRIPLE=aarch64-linux-gnu-
     LLVM=1
     LLVM_IAS=1
+    KCFLAGS="-Wno-error -Wno-misleading-indentation"
 )
 
 # 3. Base Configuration from Real Working Phone System
