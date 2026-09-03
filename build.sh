@@ -29,10 +29,19 @@ echo "   Target ROM    : LineageOS 23.2 (Android 16)"
 echo "   Base Source   : Project-Matrixx-New (Branch: $KERNEL_BRANCH)"
 echo "================================================================="
 
-# 1. Fetch Official Kernel Source (Branch ksunext-qpr2)
+# 1. Fetch Official Kernel Source (Branch ksunext-qpr2) with Submodules
 if [ ! -d "$KERNEL_DIR" ]; then
     echo "[*] Cloning kernel source repository (branch: $KERNEL_BRANCH)..."
     git clone --depth=1 -b "$KERNEL_BRANCH" "$KERNEL_SRC" "$KERNEL_DIR"
+    echo "[*] Initializing KernelSU-Next submodule..."
+    cd "$KERNEL_DIR"
+    git submodule update --init --recursive --depth 1 || true
+    if [ ! -f "$KERNEL_DIR/KernelSU-Next/kernel/Kconfig" ]; then
+        echo "[*] Direct cloning KernelSU-Next..."
+        rm -rf "$KERNEL_DIR/KernelSU-Next"
+        git clone --depth=1 https://github.com/sidex15/KernelSU-Next.git "$KERNEL_DIR/KernelSU-Next"
+    fi
+    cd "$WORK_DIR"
 fi
 
 # 2. Setup Toolchain Environment
