@@ -2,12 +2,8 @@ name: Build Laksanasoft Enterprise Kernel
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [ "main" ]
   workflow_dispatch:
-  release:
-    types: [published]
 
 permissions:
   contents: write
@@ -61,40 +57,43 @@ jobs:
           ZIP_NAME=$(basename "$ZIP_FILE")
           TAG="v1.0"
           
-          # Delete existing release/tag if already present
+          cat << 'EOF' > release_notes.md
+          ## ⚡ Laksanasoft Enterprise Kernel for Samsung Galaxy S10+ (beyond2lte)
+          
+          ### 🚀 Fitur & Driver Lengkap Teknisi:
+          - **SoC**: Samsung Exynos 9820 (Kernel Linux 4.14.356)
+          - **Brand**: Laksanasoft Enterprise Edition
+          - **Root & Stealth**: KernelSU-Next v3.3.0 + SuSFS v2.2.0
+          - **USB Serial / Hardware Hacking**:
+            - WCH CH340 / CH341 (Arduino & USB-TTL murah)
+            - Silicon Labs CP2102 / CP2104 (ESP32 / NodeMCU)
+            - FTDI FT232R
+            - Prolific PL2303
+            - Qualcomm Diag Mode (900E / 901D serial ports)
+            - USB CDC-ACM (Proxmark3, Flipper Zero, Teensy)
+          - **Smartphone Flashing Support**:
+            - Android Fastboot, MediaTek BROM (mtkclient), Qualcomm EDL 9008, Samsung Download Mode
+            - Apple iOS Normal, Recovery Mode, dan DFU Mode (idevicerestore, usbmuxd, checkra1n, palera1n)
+          - **Wi-Fi Packet Injection & Monitor Mode**:
+            - Atheros AR9271 (ath9k_htc), AR9170 (carl9170)
+            - Realtek RTL8812AU / RTL8814AU (88xxau - Dual Band)
+            - Realtek RTL8187L, RTL8xxxu
+            - Ralink RT2800USB / RT3070 / RT5370 (rt2x00 aktif!)
+            - MediaTek MT7601U
+          - **USB Arsenal & NetHunter**:
+            - BadUSB HID keyboard/mouse emulation
+            - USB Mass Storage (ISO bootable CD-ROM)
+            - RNDIS USB Ethernet
+          
+          ### 📦 Cara Flash:
+          1. Masuk ke TWRP Recovery atau gunakan aplikasi KernelSU / AnyKernel3 installer.
+          2. Flash file zip AnyKernel3.
+          3. Reboot sistem.
+          EOF
+          
           gh release delete "$TAG" --yes --cleanup-tag || true
           
           echo "[*] Publishing GitHub Release $TAG..."
           gh release create "$TAG" "$ZIP_FILE" \
             --title "⚡ Laksanasoft Enterprise Kernel $TAG (beyond2lte)" \
-            --notes "## ⚡ Laksanasoft Enterprise Kernel for Samsung Galaxy S10+ (beyond2lte)
-            
-### 🚀 Fitur & Driver Lengkap Teknisi:
-- **SoC**: Samsung Exynos 9820 (Kernel Linux 4.14.356)
-- **Brand**: Laksanasoft Enterprise
-- **Root & Stealth**: KernelSU-Next v3.3.0 + SuSFS v2.2.0
-- **USB Serial / Hardware Hacking**:
-  - WCH CH340 / CH341 (Arduino & USB-TTL murah)
-  - Silicon Labs CP2102 / CP2104 (ESP32 / NodeMCU)
-  - FTDI FT232R
-  - Prolific PL2303
-  - Qualcomm Diag Mode (900E / 901D serial ports)
-  - USB CDC-ACM (Proxmark3, Flipper Zero, Teensy)
-- **Smartphone Flashing Support**:
-  - Android Fastboot, MediaTek BROM (mtkclient), Qualcomm EDL 9008, Samsung Download Mode
-  - Apple iOS Normal, Recovery Mode, dan DFU Mode (idevicerestore, usbmuxd, checkra1n, palera1n)
-- **Wi-Fi Packet Injection & Monitor Mode**:
-  - Atheros AR9271 (ath9k_htc), AR9170 (carl9170)
-  - Realtek RTL8812AU / RTL8814AU (88xxau - Dual Band)
-  - Realtek RTL8187L, RTL8xxxu
-  - Ralink RT2800USB / RT3070 / RT5370 (rt2x00 aktif!)
-  - MediaTek MT7601U
-- **USB Arsenal & NetHunter**:
-  - BadUSB HID keyboard/mouse emulation
-  - USB Mass Storage (ISO bootable CD-ROM)
-  - RNDIS USB Ethernet
-
-### 📦 Cara Flash:
-1. Masuk ke TWRP Recovery atau gunakan aplikasi KernelSU / AnyKernel3 installer.
-2. Flash file zip: \`$ZIP_NAME\`.
-3. Reboot sistem."
+            --notes-file release_notes.md
