@@ -42,7 +42,6 @@ jobs:
         run: |
           cd kernel-source
 
-          # 1. Buat file fragment kustom berisi opsi USB Gadget, NetHunter & Crypto
           mkdir -p arch/arm64/configs/
           {
             echo "CONFIG_CONFIGFS_FS=y"
@@ -117,14 +116,21 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # 1. Terapkan defconfig persis sesuai script build.sh (exynos9820-beyond2lte_defconfig)
-          make O=out/beyond2lte exynos9820-beyond2lte_defconfig
+          # Memuat defconfig dari subfolder exynos/
+          if [ -f "arch/arm64/configs/exynos/exynos9820-beyond2lte_defconfig" ]; then
+            make O=out/beyond2lte exynos/exynos9820-beyond2lte_defconfig
+          elif [ -f "arch/arm64/configs/exynos9820-beyond2lte_defconfig" ]; then
+            make O=out/beyond2lte exynos9820-beyond2lte_defconfig
+          else
+            TARGET_CONFIG=$(find arch/arm64/configs/ -name "*beyond2lte_defconfig" | sed 's|arch/arm64/configs/||')
+            make O=out/beyond2lte "$TARGET_CONFIG"
+          fi
 
-          # 2. Gabungkan fragment custom_gadget.config menggunakan merge_config.sh resmi kernel
+          # Menggabungkan fragment custom_gadget.config
           ./scripts/kconfig/merge_config.sh -O out/beyond2lte out/beyond2lte/.config arch/arm64/configs/custom_gadget.config
           make O=out/beyond2lte olddefconfig
 
-          # 3. Kompilasi kernel secara pararel
+          # Kompilasi
           make -j$(nproc --all) O=out/beyond2lte
 
           if [ ! -f "out/beyond2lte/arch/arm64/boot/Image" ]; then
@@ -136,7 +142,6 @@ jobs:
         run: |
           cd AnyKernel3
           
-          # Salin Image hasil kompilasi ke folder AnyKernel
           cp ../kernel-source/out/beyond2lte/arch/arm64/boot/Image .
 
           ZIP_NAME="FreeRunnerKernel-beyond2lte-Lineage23-$(date +%Y%m%d-%H%M).zip"
