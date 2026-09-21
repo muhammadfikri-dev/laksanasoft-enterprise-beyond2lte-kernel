@@ -11,12 +11,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Root Repository
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Install Dependencies
         run: |
-          sudo apt-get update
           sudo apt-get install -y \
             git bc bison flex build-essential libssl-dev libncurses-dev \
             libtinfo-dev zip unzip lz4 ccache libglib2.0-0 python3 \
@@ -39,23 +38,33 @@ jobs:
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
 
-      - name: Prepare Root Custom Defconfig & Append Custom Configs
+      - name: Inject Custom Configs to Kernel Defconfig
         run: |
-          # Cek lokasi file defconf di workspace root
-          if [ -f "$GITHUB_WORKSPACE/defconf" ]; then
-            cp "$GITHUB_WORKSPACE/defconf" kernel-source/arch/arm64/configs/custom_root_defconfig
-          elif [ -f "defconf" ]; then
-            cp defconf kernel-source/arch/arm64/configs/custom_root_defconfig
+          cd kernel-source
+
+          # Tentukan base defconfig bawaan kernel
+          BASE_DEFCONFIG=""
+          if [ -f "arch/arm64/configs/beyond2lte_defconfig" ]; then
+            BASE_DEFCONFIG="beyond2lte_defconfig"
+          elif [ -f "arch/arm64/configs/exynos9820-beyond2lte_defconfig" ]; then
+            BASE_DEFCONFIG="exynos9820-beyond2lte_defconfig"
+          elif [ -f "arch/arm64/configs/exynos9820_defconfig" ]; then
+            BASE_DEFCONFIG="exynos9820_defconfig"
           else
-            echo "File defconf tidak ditemukan di root, menggunakan fallback exynos9820_defconfig bawaan kernel..."
-            if [ -f "kernel-source/arch/arm64/configs/beyond2lte_defconfig" ]; then
-              cp kernel-source/arch/arm64/configs/beyond2lte_defconfig kernel-source/arch/arm64/configs/custom_root_defconfig
-            elif [ -f "kernel-source/arch/arm64/configs/exynos9820_defconfig" ]; then
-              cp kernel-source/arch/arm64/configs/exynos9820_defconfig kernel-source/arch/arm64/configs/custom_root_defconfig
-            fi
+            BASE_DEFCONFIG=$(find arch/arm64/configs/ -name "*beyond2lte*" -o -name "*exynos9820*" | head -n 1 | xargs basename)
           fi
 
+          echo "Base defconfig ditemukan: $BASE_DEFCONFIG"
+
+          # Salin base defconfig menjadi custom_defconfig
+          cp "arch/arm64/configs/$BASE_DEFCONFIG" arch/arm64/configs/custom_defconfig
+
+          # Injeksi langsung konfigurasi kustom ke custom_defconfig
           {
+            echo ""
+            echo "# ====================================================================="
+            echo "# CUSTOM BUILT-IN CONFIGS (USB GADGET, CONFIGFS, NETWORK, CRYPTO)"
+            echo "# ====================================================================="
             echo "CONFIG_CONFIGFS_FS=y"
             echo "CONFIG_USB_GADGET=y"
             echo "CONFIG_USB_CONFIGFS=y"
@@ -112,9 +121,9 @@ jobs:
             echo "CONFIG_USB_CONFIGFS_F_DM=y"
             echo "CONFIG_USB_CONFIGFS_F_CONN_GADGET=y"
             echo "CONFIG_USB_CONFIGFS_F_SS_MON_GADGET=y"
-          } >> kernel-source/arch/arm64/configs/custom_root_defconfig
+          } >> arch/arm64/configs/custom_defconfig
 
-          echo "TARGET_DEFCONFIG=custom_root_defconfig" >> $GITHUB_ENV
+          echo "TARGET_DEFCONFIG=custom_defconfig" >> $GITHUB_ENV
 
       - name: Compile Kernel
         run: |
