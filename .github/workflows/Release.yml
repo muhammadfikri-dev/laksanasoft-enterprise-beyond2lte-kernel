@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Maximize Build Space
@@ -24,11 +24,12 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
+          sudo apt-get upgrade -y
           sudo apt-get install -y \
-            git bc bison flex build-essential libssl-dev libncurses5-dev \
-            libncurses-dev libtinfo5 zip unzip lz4 ccache libglib2.0-0 \
-            python3 python2 python-is-python3 openjdk-11-jdk clang llvm \
-            liblld-dev lld gawk wget curl xz-utils
+            git bc bison flex build-essential libssl-dev libncurses-dev \
+            libtinfo-dev zip unzip lz4 ccache libglib2.0-0 python3 \
+            python-is-python3 openjdk-11-jdk clang llvm lld gawk wget \
+            curl xz-utils libelf-dev
 
       - name: Clone Kernel Source
         run: |
@@ -60,7 +61,6 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # Check available defconfigs for beyond2lte or exynos9820
           DEFCONFIG=""
           if [ -f "arch/arm64/configs/beyond2lte_defconfig" ]; then
             DEFCONFIG="beyond2lte_defconfig"
@@ -80,7 +80,6 @@ jobs:
         run: |
           cd AnyKernel3
           
-          # Copy compiled Image / Image.lz4 / dtb if available
           if [ -f "../kernel-source/out/arch/arm64/boot/Image.lz4" ]; then
             cp ../kernel-source/out/arch/arm64/boot/Image.lz4 .
           elif [ -f "../kernel-source/out/arch/arm64/boot/Image" ]; then
@@ -97,7 +96,6 @@ jobs:
             cp ../kernel-source/out/arch/arm64/boot/dtbo.img .
           fi
 
-          # Create Zip
           ZIP_NAME="NetHunter-Kernel-Lineage23.2-beyond2lte-$(date +%Y%m%d-%H%M).zip"
           zip -r9 "$ZIP_NAME" * -x .git README.md *placeholder
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
