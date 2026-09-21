@@ -43,7 +43,6 @@ jobs:
           cd kernel-source
           mkdir -p out
 
-          # Setup PATH Toolchain
           export PATH="$(pwd)/../toolchain/proton-clang/bin:$(pwd)/../toolchain/gcc64/bin:$(pwd)/../toolchain/gcc32/bin:$PATH"
           export ARCH=arm64
           export SUBARCH=arm64
@@ -53,74 +52,69 @@ jobs:
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          # 1. Muat defconfig Exynos 9820 secara native via Kbuild
+          # Genereate base defconfig
           make O=out exynos9820_defconfig
 
-          # 2. Injeksi Opsi USB Gadget & NetHunter langsung ke out/.config
-          cat << 'EOF' >> out/.config
+          # Inject configs aman tanpa heredoc
+          {
+            echo "CONFIG_CONFIGFS_FS=y"
+            echo "CONFIG_USB_GADGET=y"
+            echo "CONFIG_USB_CONFIGFS=y"
+            echo "CONFIG_USB_CONFIGFS_UEVENT=y"
+            echo "CONFIG_USB_F_FS=y"
+            echo "CONFIG_USB_CONFIGFS_F_FS=y"
+            echo "CONFIG_USB_GADGETFS=y"
+            echo "CONFIG_USB_F_HID=y"
+            echo "CONFIG_USB_CONFIGFS_F_HID=y"
+            echo "CONFIG_USB_G_HID=y"
+            echo "CONFIG_HID_GENERIC=y"
+            echo "CONFIG_UHID=y"
+            echo "CONFIG_USB_F_CCID=y"
+            echo "CONFIG_USB_CONFIGFS_F_CCID=y"
+            echo "CONFIG_VIDEO_DEV=y"
+            echo "CONFIG_VIDEO_V4L2=y"
+            echo "CONFIG_USB_F_UVC=y"
+            echo "CONFIG_USB_CONFIGFS_F_UVC=y"
+            echo "CONFIG_SND=y"
+            echo "CONFIG_SND_PCM=y"
+            echo "CONFIG_USB_F_UAC1=y"
+            echo "CONFIG_USB_CONFIGFS_F_UAC1=y"
+            echo "CONFIG_USB_F_UAC2=y"
+            echo "CONFIG_USB_CONFIGFS_F_UAC2=y"
+            echo "CONFIG_USB_F_MASS_STORAGE=y"
+            echo "CONFIG_USB_CONFIGFS_MASS_STORAGE=y"
+            echo "CONFIG_USB_F_RNDIS=y"
+            echo "CONFIG_USB_CONFIGFS_RNDIS=y"
+            echo "CONFIG_USB_F_ECM=y"
+            echo "CONFIG_USB_CONFIGFS_ECM=y"
+            echo "CONFIG_USB_F_SUBSET=y"
+            echo "CONFIG_USB_CONFIGFS_ECM_SUBSET=y"
+            echo "CONFIG_USB_F_NCM=y"
+            echo "CONFIG_USB_CONFIGFS_NCM=y"
+            echo "CONFIG_USB_F_EEM=y"
+            echo "CONFIG_USB_CONFIGFS_EEM=y"
+            echo "CONFIG_USB_F_SERIAL=y"
+            echo "CONFIG_USB_F_ACM=y"
+            echo "CONFIG_USB_CONFIGFS_SERIAL=y"
+            echo "CONFIG_USB_CONFIGFS_ACM=y"
+            echo "CONFIG_USB_ACM=y"
+            echo "CONFIG_USB_CONFIGFS_OBEX=y"
+            echo "CONFIG_USB_F_MIDI=y"
+            echo "CONFIG_USB_CONFIGFS_F_MIDI=y"
+            echo "CONFIG_USB_F_MTP=y"
+            echo "CONFIG_USB_CONFIGFS_F_MTP=y"
+            echo "CONFIG_USB_F_PTP=y"
+            echo "CONFIG_USB_CONFIGFS_F_PTP=y"
+            echo "CONFIG_USB_CONFIGFS_F_ADB=y"
+            echo "CONFIG_CRYPTO=y"
+            echo "CONFIG_CRYPTO_RSA=y"
+            echo "CONFIG_CRYPTO_SHA256=y"
+            echo "CONFIG_CRYPTO_AES=y"
+            echo "CONFIG_USB_CONFIGFS_F_DM=y"
+            echo "CONFIG_USB_CONFIGFS_F_CONN_GADGET=y"
+            echo "CONFIG_USB_CONFIGFS_F_SS_MON_GADGET=y"
+          } >> out/.config
 
-# =====================================================================
-# CUSTOM BUILT-IN CONFIGS (USB GADGET, CONFIGFS, NETWORK, CRYPTO)
-# =====================================================================
-CONFIG_CONFIGFS_FS=y
-CONFIG_USB_GADGET=y
-CONFIG_USB_CONFIGFS=y
-CONFIG_USB_CONFIGFS_UEVENT=y
-CONFIG_USB_F_FS=y
-CONFIG_USB_CONFIGFS_F_FS=y
-CONFIG_USB_GADGETFS=y
-CONFIG_USB_F_HID=y
-CONFIG_USB_CONFIGFS_F_HID=y
-CONFIG_USB_G_HID=y
-CONFIG_HID_GENERIC=y
-CONFIG_UHID=y
-CONFIG_USB_F_CCID=y
-CONFIG_USB_CONFIGFS_F_CCID=y
-CONFIG_VIDEO_DEV=y
-CONFIG_VIDEO_V4L2=y
-CONFIG_USB_F_UVC=y
-CONFIG_USB_CONFIGFS_F_UVC=y
-CONFIG_SND=y
-CONFIG_SND_PCM=y
-CONFIG_USB_F_UAC1=y
-CONFIG_USB_CONFIGFS_F_UAC1=y
-CONFIG_USB_F_UAC2=y
-CONFIG_USB_CONFIGFS_F_UAC2=y
-CONFIG_USB_F_MASS_STORAGE=y
-CONFIG_USB_CONFIGFS_MASS_STORAGE=y
-CONFIG_USB_F_RNDIS=y
-CONFIG_USB_CONFIGFS_RNDIS=y
-CONFIG_USB_F_ECM=y
-CONFIG_USB_CONFIGFS_ECM=y
-CONFIG_USB_F_SUBSET=y
-CONFIG_USB_CONFIGFS_ECM_SUBSET=y
-CONFIG_USB_F_NCM=y
-CONFIG_USB_CONFIGFS_NCM=y
-CONFIG_USB_F_EEM=y
-CONFIG_USB_CONFIGFS_EEM=y
-CONFIG_USB_F_SERIAL=y
-CONFIG_USB_F_ACM=y
-CONFIG_USB_CONFIGFS_SERIAL=y
-CONFIG_USB_CONFIGFS_ACM=y
-CONFIG_USB_ACM=y
-CONFIG_USB_CONFIGFS_OBEX=y
-CONFIG_USB_F_MIDI=y
-CONFIG_USB_CONFIGFS_F_MIDI=y
-CONFIG_USB_F_MTP=y
-CONFIG_USB_CONFIGFS_F_MTP=y
-CONFIG_USB_F_PTP=y
-CONFIG_USB_CONFIGFS_F_PTP=y
-CONFIG_USB_CONFIGFS_F_ADB=y
-CONFIG_CRYPTO=y
-CONFIG_CRYPTO_RSA=y
-CONFIG_CRYPTO_SHA256=y
-CONFIG_CRYPTO_AES=y
-CONFIG_USB_CONFIGFS_F_DM=y
-CONFIG_USB_CONFIGFS_F_CONN_GADGET=y
-CONFIG_USB_CONFIGFS_F_SS_MON_GADGET=y
-EOF
-
-          # 3. Sinkronkan dan perbaiki ketergantungan Kconfig secara otomatis
           make O=out olddefconfig
 
       - name: Compile Kernel
@@ -137,7 +131,6 @@ EOF
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          echo "Memulai proses kompilasi kernel..."
           make -j$(nproc --all) O=out
 
           if [ ! -f "out/arch/arm64/boot/Image" ] && [ ! -f "out/arch/arm64/boot/Image.lz4" ]; then
