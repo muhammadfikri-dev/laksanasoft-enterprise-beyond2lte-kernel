@@ -1,4 +1,4 @@
-name: Build FreeRunnerKernel (kernel-16 / LineageOS 23)
+name: Build FreeRunnerKernel (LineageOS 23 / beyond2lte)
 
 on:
   workflow_dispatch:
@@ -33,47 +33,17 @@ jobs:
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain/gcc64
           git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git toolchain/gcc32
 
-      - name: Clone AnyKernel3
+      - name: Clone Official AnyKernel3
         run: |
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          git clone --depth=1 https://github.com/LeDrew2017/Anykernel.git AnyKernel3
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
 
-      - name: Generate Base .config & Inject Built-in Configs
+      - name: Prepare Defconfig and Custom Fragment
         run: |
           cd kernel-source
-          mkdir -p out
 
-          # Setup PATH Toolchain
-          export PATH="$(pwd)/../toolchain/proton-clang/bin:$(pwd)/../toolchain/gcc64/bin:$(pwd)/../toolchain/gcc32/bin:$PATH"
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export HEADER_ARCH=arm64
-          export CC=clang
-          export CROSS_COMPILE=aarch64-linux-android-
-          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-
-          # Detect target defconfig for S10+ (beyond2lte)
-          TARGET_DEFCONFIG=""
-          if [ -f "arch/arm64/configs/beyond2lte_defconfig" ]; then
-            TARGET_DEFCONFIG="beyond2lte_defconfig"
-          elif [ -f "arch/arm64/configs/exynos9820-beyond2lte_defconfig" ]; then
-            TARGET_DEFCONFIG="exynos9820-beyond2lte_defconfig"
-          else
-            TARGET_DEFCONFIG=$(ls arch/arm64/configs/ | grep -iE "beyond2|exynos9820" | head -n 1)
-          fi
-
-          if [ -z "$TARGET_DEFCONFIG" ]; then
-            echo "ERROR: Target defconfig tidak ditemukan di arch/arm64/configs/!"
-            echo "Isi folder arch/arm64/configs/:"
-            ls -la arch/arm64/configs/
-            exit 1
-          fi
-
-          echo "Menggunakan Target Defconfig: $TARGET_DEFCONFIG"
-          make O=out $TARGET_DEFCONFIG
-
-          # Append USB Gadget, NetHunter & Crypto configs
+          # 1. Buat file fragment kustom berisi opsi USB Gadget, NetHunter & Crypto
+          mkdir -p arch/arm64/configs/
           {
             echo "CONFIG_CONFIGFS_FS=y"
             echo "CONFIG_USB_GADGET=y"
@@ -131,28 +101,34 @@ jobs:
             echo "CONFIG_USB_CONFIGFS_F_DM=y"
             echo "CONFIG_USB_CONFIGFS_F_CONN_GADGET=y"
             echo "CONFIG_USB_CONFIGFS_F_SS_MON_GADGET=y"
-          } >> out/.config
-
-          make O=out olddefconfig
+          } > arch/arm64/configs/custom_gadget.config
 
       - name: Compile Kernel
         run: |
           cd kernel-source
-          
+          mkdir -p out/beyond2lte
+
           export PATH="$(pwd)/../toolchain/proton-clang/bin:$(pwd)/../toolchain/gcc64/bin:$(pwd)/../toolchain/gcc32/bin:$PATH"
           export ARCH=arm64
           export SUBARCH=arm64
           export HEADER_ARCH=arm64
-          
           export CC=clang
           export CROSS_COMPILE=aarch64-linux-android-
           export CROSS_COMPILE_ARM32=arm-linux-androideabi-
           export CLANG_TRIPLE=aarch64-linux-gnu-
 
-          make -j$(nproc --all) O=out
+          # 1. Terapkan defconfig persis sesuai script build.sh (exynos9820-beyond2lte_defconfig)
+          make O=out/beyond2lte exynos9820-beyond2lte_defconfig
 
-          if [ ! -f "out/arch/arm64/boot/Image" ] && [ ! -f "out/arch/arm64/boot/Image.lz4" ]; then
-            echo "ERROR: Biner kernel (Image/Image.lz4) gagal dibuat!"
+          # 2. Gabungkan fragment custom_gadget.config menggunakan merge_config.sh resmi kernel
+          ./scripts/kconfig/merge_config.sh -O out/beyond2lte out/beyond2lte/.config arch/arm64/configs/custom_gadget.config
+          make O=out/beyond2lte olddefconfig
+
+          # 3. Kompilasi kernel secara pararel
+          make -j$(nproc --all) O=out/beyond2lte
+
+          if [ ! -f "out/beyond2lte/arch/arm64/boot/Image" ]; then
+            echo "ERROR: File Image tidak ditemukan! Kompilasi gagal."
             exit 1
           fi
 
@@ -160,24 +136,12 @@ jobs:
         run: |
           cd AnyKernel3
           
-          if [ -f "../kernel-source/out/arch/arm64/boot/Image.lz4" ]; then
-            cp ../kernel-source/out/arch/arm64/boot/Image.lz4 .
-          elif [ -f "../kernel-source/out/arch/arm64/boot/Image" ]; then
-            cp ../kernel-source/out/arch/arm64/boot/Image .
-          fi
+          # Salin Image hasil kompilasi ke folder AnyKernel
+          cp ../kernel-source/out/beyond2lte/arch/arm64/boot/Image .
 
-          if [ -f "../kernel-source/out/arch/arm64/boot/dtb.img" ]; then
-            cp ../kernel-source/out/arch/arm64/boot/dtb.img dtb
-          elif [ -f "../kernel-source/out/arch/arm64/boot/dtb" ]; then
-            cp ../kernel-source/out/arch/arm64/boot/dtb .
-          fi
-
-          if [ -f "../kernel-source/out/arch/arm64/boot/dtbo.img" ]; then
-            cp ../kernel-source/out/arch/arm64/boot/dtbo.img .
-          fi
-
-          ZIP_NAME="FreeRunnerKernel-Lineage23-beyond2lte-$(date +%Y%m%d-%H%M).zip"
-          zip -r9 "$ZIP_NAME" * -x .git README.md *placeholder
+          ZIP_NAME="FreeRunnerKernel-beyond2lte-Lineage23-$(date +%Y%m%d-%H%M).zip"
+          zip -r9 "$ZIP_NAME" * -x .git\* README.md\*
+          
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
       - name: Upload Artifact
