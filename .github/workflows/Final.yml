@@ -1,0 +1,882 @@
+name: NetHunter FINAL - Galaxy S10+ G975F beyond2lte
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEVICE: beyond2lte
+  MODEL: SM-G975F
+  ARCH: arm64
+  DEFCONFIG: nethunter_beyond2lte_defconfig
+  BOOT_MAX_BYTES: 57671680
+  KERNEL_REPO: https://github.com/v0lk3n/nethunter_kernel_samsung_exynos9820.git
+  KERNEL_BRANCH: nethunter-lineage-23.2
+
+jobs:
+  build:
+    name: Build NetHunter for SM-G975F
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      # ------------------------------------------------------------
+      # 1. CHECKOUT
+      # ------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ------------------------------------------------------------
+      # 2. DEPENDENCIES
+      # ------------------------------------------------------------
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          sudo apt-get update
+
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            git \
+            bc \
+            bison \
+            flex \
+            build-essential \
+            clang \
+            llvm \
+            lld \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            libssl-dev \
+            libelf-dev \
+            libncurses5-dev \
+            libncurses-dev \
+            device-tree-compiler \
+            dwarves \
+            pahole \
+            cpio \
+            rsync \
+            zip \
+            unzip \
+            gzip \
+            xz-utils \
+            lz4 \
+            zstd \
+            python3 \
+            python3-pip \
+            file \
+            wget \
+            curl \
+            lzop \
+            u-boot-tools
+
+          clang --version
+          ld.lld --version
+          aarch64-linux-gnu-gcc --version
+
+      # ------------------------------------------------------------
+      # 3. CLONE DEVICE KERNEL
+      # ------------------------------------------------------------
+      - name: Clone NetHunter kernel
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          rm -rf kernel
+
+          git clone \
+            --depth=1 \
+            --branch "${KERNEL_BRANCH}" \
+            "${KERNEL_REPO}" \
+            kernel
+
+          cd kernel
+
+          echo "Commit:"
+          git rev-parse HEAD
+
+          echo "Branch:"
+          git branch --show-current
+
+          echo "Kernel Makefile:"
+          head -40 Makefile
+
+      # ------------------------------------------------------------
+      # 4. CREATE OUTPUT DIRECTORIES
+      # ------------------------------------------------------------
+      - name: Prepare build directories
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p \
+            kernel/out \
+            artifacts \
+            reports \
+            packaging
+
+      # ------------------------------------------------------------
+      # 5. DETECT TOOLCHAIN
+      # ------------------------------------------------------------
+      - name: Detect Clang toolchain
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          cd kernel
+
+          {
+            echo "=== SYSTEM TOOLCHAIN ==="
+            clang --version || true
+            echo
+            llvm-as --version || true
+            echo
+            ld.lld --version || true
+            echo
+            echo "=== POSSIBLE SOURCE TOOLCHAINS ==="
+            find .. -maxdepth 5 -type f \
+              \( -name clang -o -name clang-23 -o -name clang++ \) \
+              -perm -111 2>/dev/null | head -100 || true
+          } | tee ../reports/toolchain-detection.txt
+
+          TOOLCHAIN_BIN=""
+
+          for d in \
+            "$PWD/toolchain/bin" \
+            "$PWD/prebuilts/clang/bin" \
+            "$PWD/prebuilts/clang/host/linux-x86/clang-r*/bin" \
+            "$PWD/../toolchain/bin"
+          do
+            if compgen -G "$d/clang" > /dev/null 2>&1; then
+              TOOLCHAIN_BIN="$(dirname "$(compgen -G "$d/clang" | head -1)")"
+              break
+            fi
+          done
+
+          if [ -n "$TOOLCHAIN_BIN" ]; then
+            echo "Using source-provided toolchain:"
+            echo "$TOOLCHAIN_BIN"
+
+            echo "TOOLCHAIN_BIN=$TOOLCHAIN_BIN" >> "$GITHUB_ENV"
+          else
+            echo "No source-provided toolchain detected."
+            echo "Using Ubuntu LLVM/Clang."
+            echo "TOOLCHAIN_BIN=" >> "$GITHUB_ENV"
+          fi
+
+      # ------------------------------------------------------------
+      # 6. BASE DEFCONFIG
+      #
+      # Important:
+      # First compile the original device configuration.
+      # This separates device/source/toolchain problems from
+      # NetHunter configuration problems.
+      # ------------------------------------------------------------
+      - name: Generate base device configuration
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd kernel
+
+          make \
+            O="$PWD/out" \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            "${DEFCONFIG}"
+
+          cp out/.config ../reports/base-defconfig.config
+
+          make \
+            O="$PWD/out" \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            olddefconfig
+
+          cp out/.config ../reports/base-olddefconfig.config
+
+      # ------------------------------------------------------------
+      # 7. DEVICE-SAFE NETHUNTER CONFIG
+      #
+      # Existing Samsung hardware drivers are NOT disabled.
+      # External USB Wi-Fi chipset drivers are deliberately not added.
+      # ------------------------------------------------------------
+      - name: Create NetHunter device-safe config fragment
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd kernel
+
+          cat > out/nethunter.fragment <<'EOF'
+          # ==========================================================
+          # NetHunter / Container support
+          # Galaxy S10+ SM-G975F / beyond2lte
+          # ==========================================================
+
+          # --------------------------
+          # Namespaces
+          # --------------------------
+          CONFIG_NAMESPACES=y
+          CONFIG_UTS_NS=y
+          CONFIG_IPC_NS=y
+          CONFIG_PID_NS=y
+          CONFIG_NET_NS=y
+          CONFIG_USER_NS=y
+
+          # --------------------------
+          # Cgroups
+          # --------------------------
+          CONFIG_CGROUPS=y
+          CONFIG_CGROUP_SCHED=y
+          CONFIG_CGROUP_PIDS=y
+          CONFIG_CGROUP_FREEZER=y
+          CONFIG_CGROUP_DEVICE=y
+          CONFIG_CGROUP_CPUACCT=y
+
+          # --------------------------
+          # Core pseudo filesystems
+          # --------------------------
+          CONFIG_DEVTMPFS=y
+          CONFIG_DEVTMPFS_MOUNT=y
+          CONFIG_TMPFS=y
+          CONFIG_PROC_FS=y
+          CONFIG_SYSFS=y
+          CONFIG_CONFIGFS_FS=y
+
+          # --------------------------
+          # Container filesystems
+          # --------------------------
+          CONFIG_EXT4_FS=y
+          CONFIG_F2FS_FS=y
+          CONFIG_SQUASHFS=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_FUSE_FS=y
+
+          # --------------------------
+          # Loop / device mapper
+          # --------------------------
+          CONFIG_BLK_DEV_LOOP=y
+          CONFIG_BLK_DEV_DM=y
+          CONFIG_DM_CRYPT=y
+          CONFIG_DM_SNAPSHOT=y
+          CONFIG_DM_VERITY=y
+
+          # --------------------------
+          # Networking
+          # --------------------------
+          CONFIG_NET=y
+          CONFIG_INET=y
+          CONFIG_IPV6=y
+          CONFIG_PACKET=y
+          CONFIG_UNIX=y
+
+          # --------------------------
+          # Virtual networking
+          # --------------------------
+          CONFIG_VETH=y
+          CONFIG_TUN=y
+          CONFIG_BRIDGE=y
+          CONFIG_BRIDGE_NETFILTER=y
+          CONFIG_VLAN_8021Q=y
+          CONFIG_MACVLAN=y
+          CONFIG_IPVLAN=y
+          CONFIG_DUMMY=y
+
+          # --------------------------
+          # Netfilter / NAT
+          # --------------------------
+          CONFIG_NETFILTER=y
+          CONFIG_NETFILTER_ADVANCED=y
+          CONFIG_NF_CONNTRACK=y
+          CONFIG_NF_NAT=y
+          CONFIG_NF_TABLES=y
+          CONFIG_NF_TABLES_INET=y
+          CONFIG_NETFILTER_XTABLES=y
+          CONFIG_NETFILTER_XT_TARGET_MASQUERADE=y
+          CONFIG_NETFILTER_XT_TARGET_REDIRECT=y
+          CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y
+          CONFIG_NETFILTER_XT_MATCH_COMMENT=y
+          CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y
+          CONFIG_NETFILTER_XT_MATCH_IPRANGE=y
+          CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y
+          CONFIG_NETFILTER_XT_MATCH_STATE=y
+          CONFIG_NETFILTER_XT_MATCH_TCPMSS=y
+
+          # --------------------------
+          # HID
+          # --------------------------
+          CONFIG_HID=y
+          CONFIG_HIDRAW=y
+          CONFIG_UHID=y
+
+          # --------------------------
+          # USB Gadget
+          # --------------------------
+          CONFIG_USB_GADGET=y
+          CONFIG_USB_CONFIGFS=y
+          CONFIG_USB_F_HID=y
+
+          # --------------------------
+          # USB networking
+          # --------------------------
+          CONFIG_USB_CONFIGFS_RNDIS=y
+          CONFIG_USB_CONFIGFS_ECM=y
+          CONFIG_USB_CONFIGFS_NCM=y
+
+          # --------------------------
+          # USB serial
+          # --------------------------
+          CONFIG_USB_ACM=y
+
+          # --------------------------
+          # USB storage
+          # --------------------------
+          CONFIG_USB_MASS_STORAGE=y
+
+          # --------------------------
+          # Crypto
+          # --------------------------
+          CONFIG_CRYPTO_AES=y
+          CONFIG_CRYPTO_SHA1=y
+          CONFIG_CRYPTO_SHA256=y
+          CONFIG_CRYPTO_HMAC=y
+          CONFIG_CRYPTO_CBC=y
+          CONFIG_CRYPTO_CTR=y
+
+          # --------------------------
+          # Kernel modules
+          # --------------------------
+          CONFIG_MODULES=y
+          CONFIG_MODULE_UNLOAD=y
+
+          EOF
+
+          sed -n '1,240p' out/nethunter.fragment \
+            | tee ../reports/nethunter.fragment
+
+      # ------------------------------------------------------------
+      # 8. MERGE CONFIG
+      # ------------------------------------------------------------
+      - name: Merge NetHunter configuration
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd kernel
+
+          scripts/kconfig/merge_config.sh \
+            -m \
+            -O "$PWD/out" \
+            "$PWD/out/.config" \
+            "$PWD/out/nethunter.fragment"
+
+          make \
+            O="$PWD/out" \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            olddefconfig
+
+          cp out/.config ../reports/final-config.config
+
+      # ------------------------------------------------------------
+      # 9. VALIDATE IMPORTANT CONFIG
+      # ------------------------------------------------------------
+      - name: Validate kernel configuration
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd kernel
+
+          {
+            echo "========================================"
+            echo "NetHunter FINAL CONFIG"
+            echo "========================================"
+
+            for x in \
+              CONFIG_NAMESPACES \
+              CONFIG_UTS_NS \
+              CONFIG_IPC_NS \
+              CONFIG_PID_NS \
+              CONFIG_NET_NS \
+              CONFIG_USER_NS \
+              CONFIG_CGROUPS \
+              CONFIG_CGROUP_SCHED \
+              CONFIG_CGROUP_DEVICE \
+              CONFIG_CGROUP_FREEZER \
+              CONFIG_OVERLAY_FS \
+              CONFIG_FUSE_FS \
+              CONFIG_VETH \
+              CONFIG_TUN \
+              CONFIG_BRIDGE \
+              CONFIG_NETFILTER \
+              CONFIG_NF_CONNTRACK \
+              CONFIG_NF_NAT \
+              CONFIG_HID \
+              CONFIG_HIDRAW \
+              CONFIG_UHID \
+              CONFIG_USB_GADGET \
+              CONFIG_USB_CONFIGFS \
+              CONFIG_USB_F_HID \
+              CONFIG_USB_CONFIGFS_RNDIS \
+              CONFIG_USB_CONFIGFS_ECM \
+              CONFIG_USB_CONFIGFS_NCM \
+              CONFIG_USB_ACM
+            do
+              printf '%-42s ' "$x"
+              grep -E "^${x}=" out/.config || echo "NOT_SET"
+            done
+          } | tee ../reports/config-validation.txt
+
+      # ------------------------------------------------------------
+      # 10. FULL BUILD WITH COMPLETE LOG
+      # ------------------------------------------------------------
+      - name: Build kernel
+        id: kernel_build
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+
+          cd kernel
+
+          START_TIME="$(date +%s)"
+
+          make \
+            -j"$(nproc)" \
+            O="$PWD/out" \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            V=1 \
+            2>&1 | tee ../reports/full-build.log
+
+          BUILD_RC="${PIPESTATUS[0]}"
+
+          END_TIME="$(date +%s)"
+          BUILD_TIME="$((END_TIME - START_TIME))"
+
+          echo "$BUILD_RC" > ../reports/build-exit-code.txt
+          echo "$BUILD_TIME" > ../reports/build-time-seconds.txt
+
+          {
+            echo
+            echo "========================================"
+            echo "BUILD EXIT CODE: $BUILD_RC"
+            echo "BUILD TIME: ${BUILD_TIME}s"
+            echo "========================================"
+          } | tee -a ../reports/full-build.log
+
+          # Root errors -- not just final Error 2
+          grep -nEi \
+            'error:|fatal error:|undefined reference|ld\.lld: error|clang: error|No rule to make target|recipe for target.*failed|FAILED:' \
+            ../reports/full-build.log \
+            > ../reports/root-errors.log || true
+
+          tail -n 300 ../reports/full-build.log \
+            > ../reports/build-tail-300.log
+
+          exit "$BUILD_RC"
+
+      # ------------------------------------------------------------
+      # 11. COLLECT FAILURE DIAGNOSTICS
+      # ------------------------------------------------------------
+      - name: Collect diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          {
+            echo "========================================"
+            echo "SYSTEM"
+            echo "========================================"
+            uname -a
+
+            echo
+            echo "========================================"
+            echo "CPU"
+            echo "========================================"
+            nproc
+
+            echo
+            echo "========================================"
+            echo "MEMORY"
+            echo "========================================"
+            free -h
+
+            echo
+            echo "========================================"
+            echo "CLANG"
+            echo "========================================"
+            clang --version || true
+
+            echo
+            echo "========================================"
+            echo "LLD"
+            echo "========================================"
+            ld.lld --version || true
+
+            echo
+            echo "========================================"
+            echo "GCC CROSS"
+            echo "========================================"
+            aarch64-linux-gnu-gcc --version || true
+
+            echo
+            echo "========================================"
+            echo "KERNEL GIT"
+            echo "========================================"
+            cd kernel
+            git status --short || true
+            git log -1 --oneline || true
+          } | tee reports/build-environment.txt
+
+          if [ -f kernel/out/.config ]; then
+            cp kernel/out/.config reports/final-config-after-build.config
+          fi
+
+      # ------------------------------------------------------------
+      # 12. FAIL IF BUILD FAILED
+      # ------------------------------------------------------------
+      - name: Stop if kernel compilation failed
+        if: steps.kernel_build.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "===================================================="
+          echo "KERNEL BUILD FAILED"
+          echo "===================================================="
+          echo
+          echo "Root errors:"
+          cat reports/root-errors.log 2>/dev/null || true
+          echo
+          echo "Last 300 lines:"
+          cat reports/build-tail-300.log 2>/dev/null || true
+          exit 1
+
+      # ------------------------------------------------------------
+      # 13. LOCATE KERNEL IMAGE
+      # ------------------------------------------------------------
+      - name: Locate kernel image
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd kernel
+
+          {
+            echo "=== KERNEL OUTPUTS ==="
+            find out -maxdepth 5 -type f \
+              \( \
+                -name 'Image' \
+                -o -name 'Image.gz' \
+                -o -name 'Image.gz-dtb' \
+                -o -name 'zImage' \
+                -o -name '*.dtb' \
+                -o -name '*.dtbo' \
+              \) \
+              -print \
+              -exec ls -lh {} \;
+          } | tee ../reports/kernel-images.txt
+
+          KERNEL_IMAGE=""
+
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            KERNEL_IMAGE="out/arch/arm64/boot/Image.gz-dtb"
+          elif [ -f out/arch/arm64/boot/Image.gz ]; then
+            KERNEL_IMAGE="out/arch/arm64/boot/Image.gz"
+          elif [ -f out/arch/arm64/boot/Image ]; then
+            KERNEL_IMAGE="out/arch/arm64/boot/Image"
+          fi
+
+          if [ -z "$KERNEL_IMAGE" ]; then
+            echo "ERROR: No ARM64 kernel image found."
+            exit 1
+          fi
+
+          cp "$KERNEL_IMAGE" ../packaging/kernel.bin
+
+          echo "Selected:"
+          echo "$KERNEL_IMAGE"
+
+          file ../packaging/kernel.bin
+          ls -lh ../packaging/kernel.bin
+
+      # ------------------------------------------------------------
+      # 14. COLLECT DTB / DTBO
+      # ------------------------------------------------------------
+      - name: Collect device tree
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd kernel
+
+          mkdir -p ../packaging/dtb ../packaging/dtbo
+
+          find out/arch/arm64/boot \
+            -type f \
+            -name '*.dtb' \
+            -exec cp {} ../packaging/dtb/ \; \
+            || true
+
+          find out/arch/arm64/boot \
+            -type f \
+            -name '*.dtbo' \
+            -exec cp {} ../packaging/dtbo/ \; \
+            || true
+
+          find out/arch/arm64/boot \
+            -type f \
+            -name '*.dtb' \
+            -exec cp {} ../artifacts/ \; \
+            || true
+
+          find out/arch/arm64/boot \
+            -type f \
+            -name '*.dtbo' \
+            -exec cp {} ../artifacts/ \; \
+            || true
+
+          {
+            echo "=== DTB ==="
+            find ../packaging/dtb -type f -exec ls -lh {} \;
+
+            echo
+            echo "=== DTBO ==="
+            find ../packaging/dtbo -type f -exec ls -lh {} \;
+          } | tee ../reports/dtb-dtbo.txt
+
+      # ------------------------------------------------------------
+      # 15. COLLECT MODULES
+      # ------------------------------------------------------------
+      - name: Collect modules
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd kernel
+
+          mkdir -p ../packaging/modules
+
+          find out \
+            -type f \
+            -name '*.ko' \
+            -exec cp --parents {} ../packaging/modules/ \; \
+            || true
+
+          find ../packaging/modules \
+            -type f \
+            -name '*.ko' \
+            -exec strip --strip-unneeded {} \; \
+            || true
+
+          find ../packaging/modules \
+            -type f \
+            -name '*.ko' \
+            | sort \
+            > ../reports/modules.txt
+
+          echo "Module count:"
+          wc -l ../reports/modules.txt
+
+      # ------------------------------------------------------------
+      # 16. TRY TO BUILD BOOT IMAGE
+      #
+      # We do NOT silently invent a Samsung boot header.
+      #
+      # If the kernel tree has a known mkbootimg/boot image builder,
+      # use it. Otherwise stop before creating a potentially invalid
+      # boot.img.
+      # ------------------------------------------------------------
+      - name: Locate boot image tooling
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          {
+            echo "=== POSSIBLE BOOT TOOLS ==="
+
+            command -v mkbootimg || true
+            command -v magiskboot || true
+
+            find kernel . \
+              -type f \
+              \( \
+                -name 'mkbootimg.py' \
+                -o -name 'mkbootimg' \
+                -o -name 'magiskboot' \
+              \) \
+              2>/dev/null \
+              | head -100
+
+            echo
+            echo "=== BOOT/IMAGE RELATED FILES ==="
+
+            find kernel \
+              -type f \
+              \( \
+                -iname '*boot*.img' \
+                -o -iname '*mkboot*' \
+                -o -iname '*dtb*' \
+                -o -iname '*dtbo*' \
+              \) \
+              2>/dev/null \
+              | head -200
+          } | tee reports/boot-tooling.txt
+
+      # ------------------------------------------------------------
+      # 17. PACKAGE KERNEL ARTIFACTS
+      # ------------------------------------------------------------
+      - name: Package kernel artifacts
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cp packaging/kernel.bin artifacts/
+
+          if [ -d packaging/modules ]; then
+            cp -a packaging/modules artifacts/
+          fi
+
+          cp reports/final-config-after-build.config \
+            artifacts/kernel.config
+
+          cp reports/config-validation.txt \
+            artifacts/
+
+          cp reports/toolchain-detection.txt \
+            artifacts/
+
+          cp reports/kernel-images.txt \
+            artifacts/
+
+          cd artifacts
+
+          zip -r \
+            ../NetHunter-beyond2lte-FINAL-KERNEL.zip \
+            kernel.bin \
+            kernel.config \
+            config-validation.txt \
+            toolchain-detection.txt \
+            kernel-images.txt \
+            modules \
+            *.dtb \
+            *.dtbo \
+            2>/dev/null || true
+
+      # ------------------------------------------------------------
+      # 18. BUILD REPORT
+      # ------------------------------------------------------------
+      - name: Generate final build report
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          {
+            echo "===================================================="
+            echo "NetHunter FINAL BUILD REPORT"
+            echo "===================================================="
+            echo
+            echo "Device       : ${DEVICE}"
+            echo "Model        : ${MODEL}"
+            echo "Architecture : ${ARCH}"
+            echo "Defconfig    : ${DEFCONFIG}"
+            echo "Kernel branch: ${KERNEL_BRANCH}"
+            echo
+            echo "Target boot partition:"
+            echo "  /dev/block/sda14"
+            echo "  Approx size: 55 MiB"
+            echo
+            echo "Recovery:"
+            echo "  /dev/block/sda15"
+            echo "  Approx size: 64.5 MiB"
+            echo
+            echo "DTB:"
+            echo "  /dev/block/sda12"
+            echo
+            echo "DTBO:"
+            echo "  /dev/block/sda13"
+            echo
+            echo "VBMETA:"
+            echo "  /dev/block/sda23"
+            echo
+            echo "===================================================="
+            echo "KERNEL SIZE"
+            echo "===================================================="
+
+            ls -lh packaging/kernel.bin
+
+            stat -c 'kernel.bin bytes = %s' \
+              packaging/kernel.bin
+
+            echo
+            echo "===================================================="
+            echo "BOOT IMAGE LIMIT"
+            echo "===================================================="
+
+            echo "Maximum boot partition bytes:"
+            echo "${BOOT_MAX_BYTES}"
+
+          } | tee reports/final-build-report.txt
+
+      # ------------------------------------------------------------
+      # 19. SHA256
+      # ------------------------------------------------------------
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          find artifacts \
+            -type f \
+            -exec sha256sum {} \; \
+            > artifacts/SHA256SUMS.txt
+
+          sha256sum \
+            NetHunter-beyond2lte-FINAL-KERNEL.zip \
+            >> artifacts/SHA256SUMS.txt
+
+      # ------------------------------------------------------------
+      # 20. REPORT ARCHIVE
+      # ------------------------------------------------------------
+      - name: Archive build reports
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          tar -czf \
+            NetHunter-beyond2lte-FINAL-REPORTS.tar.gz \
+            reports
+
+      # ------------------------------------------------------------
+      # 21. UPLOAD ARTIFACTS
+      # ------------------------------------------------------------
+      - name: Upload kernel artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetHunter-beyond2lte-FINAL
+          path: |
+            NetHunter-beyond2lte-FINAL-KERNEL.zip
+            NetHunter-beyond2lte-FINAL-REPORTS.tar.gz
+            artifacts/
+            reports/
+          if-no-files-found: warn
+          retention-days: 30
