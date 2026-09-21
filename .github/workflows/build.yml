@@ -1,0 +1,463 @@
+name: Analyze & Build NetHunter - beyond2lte
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  KERNEL_REPO: https://github.com/v0lk3n/nethunter_kernel_samsung_exynos9820.git
+  KERNEL_BRANCH: nethunter-lineage-23.2
+
+  FREERUNNER_REPO: https://github.com/LeDrew2017/FreeRunnerKernel.git
+
+  DEVICE: beyond2lte
+  ARCH: arm64
+
+jobs:
+
+  build:
+    name: Build Samsung S10+ Exynos9820
+    runs-on: ubuntu-22.04
+
+    steps:
+
+      # =====================================================
+      # GitHub repository
+      # =====================================================
+
+      - name: Checkout builder repository
+        uses: actions/checkout@v4
+
+
+      # =====================================================
+      # Dependencies
+      # =====================================================
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            git \
+            curl \
+            wget \
+            bc \
+            bison \
+            flex \
+            build-essential \
+            zip \
+            unzip \
+            cpio \
+            rsync \
+            python3 \
+            python3-pip \
+            python3-setuptools \
+            libssl-dev \
+            libelf-dev \
+            libncurses5-dev \
+            libncurses-dev \
+            device-tree-compiler \
+            gcc \
+            g++ \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            clang \
+            llvm \
+            lld \
+            dwarves \
+            pahole
+
+
+      # =====================================================
+      # Clone NetHunter kernel
+      # =====================================================
+
+      - name: Clone NetHunter kernel
+        run: |
+          git clone \
+            --recursive \
+            --branch "${KERNEL_BRANCH}" \
+            "${KERNEL_REPO}" \
+            kernel
+
+          cd kernel
+
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+          echo "Kernel commit:"
+          git rev-parse HEAD
+
+
+      # =====================================================
+      # Clone FreeRunnerKernel
+      # =====================================================
+
+      - name: Clone FreeRunnerKernel
+        run: |
+          git clone \
+            --recursive \
+            "${FREERUNNER_REPO}" \
+            freerunner
+
+          cd freerunner
+
+          echo "FreeRunner commit:"
+          git rev-parse HEAD
+
+
+      # =====================================================
+      # Inspect both sources
+      # =====================================================
+
+      - name: Inspect source trees
+        run: |
+          mkdir -p analysis
+
+          echo "============================================"
+          echo "NETHUNTER KERNEL TREE"
+          echo "============================================"
+
+          find kernel \
+            -maxdepth 3 \
+            -type f \
+            | sort \
+            > analysis/nethunter-tree.txt
+
+          head -500 analysis/nethunter-tree.txt
+
+          echo
+          echo "============================================"
+          echo "FREERUNNER KERNEL TREE"
+          echo "============================================"
+
+          find freerunner \
+            -maxdepth 3 \
+            -type f \
+            | sort \
+            > analysis/freerunner-tree.txt
+
+          head -500 analysis/freerunner-tree.txt
+
+
+      # =====================================================
+      # Search build configuration
+      # =====================================================
+
+      - name: Analyze build configuration
+        run: |
+
+          echo "============================================"
+          echo "DEFCONFIG SEARCH"
+          echo "============================================"
+
+          find kernel \
+            -type f \
+            \( \
+              -name '*defconfig*' \
+              -o \
+              -name 'build.sh' \
+              -o \
+              -name '*mkbootimg*' \
+              -o \
+              -name 'AnyKernel*' \
+              -o \
+              -name 'anykernel.sh' \
+            \) \
+            | sort \
+            > analysis/kernel-build-files.txt
+
+          cat analysis/kernel-build-files.txt
+
+
+          echo
+          echo "============================================"
+          echo "RELEVANT REFERENCES"
+          echo "============================================"
+
+          grep -RniE \
+            'beyond2lte|exynos9820|defconfig|mkbootimg|vendor_boot|dtbo|AnyKernel|boot.img' \
+            kernel \
+            --exclude-dir=.git \
+            > analysis/nethunter-references.txt \
+            || true
+
+          grep -RniE \
+            'beyond2lte|exynos9820|defconfig|mkbootimg|vendor_boot|dtbo|AnyKernel|boot.img' \
+            freerunner \
+            --exclude-dir=.git \
+            > analysis/freerunner-references.txt \
+            || true
+
+
+      # =====================================================
+      # Locate defconfig
+      # =====================================================
+
+      - name: Detect defconfig
+        working-directory: kernel
+        shell: bash
+        run: |
+
+          set -e
+
+          echo "Available ARM64 configs:"
+          find arch/arm64/configs \
+            -type f \
+            | sort
+
+          echo
+          echo "Possible S10 / Exynos9820 configs:"
+
+          find arch/arm64/configs \
+            -type f \
+            | grep -Ei \
+              'beyond2lte|exynos9820|beyond' \
+            || true
+
+          DEFCONFIG=""
+
+          for cfg in \
+            beyond2lte_defconfig \
+            beyond2lte_kor_defconfig \
+            beyond2lte_eur_defconfig \
+            exynos9820_defconfig
+          do
+
+            if [ -f "arch/arm64/configs/$cfg" ]; then
+              DEFCONFIG="$cfg"
+              break
+            fi
+
+          done
+
+          if [ -z "$DEFCONFIG" ]; then
+            echo "::warning::Automatic defconfig detection failed."
+
+            echo "DEFCONFIG=" >> "$GITHUB_ENV"
+
+            exit 0
+          fi
+
+          echo "Detected defconfig:"
+          echo "$DEFCONFIG"
+
+          echo "DEFCONFIG=$DEFCONFIG" >> "$GITHUB_ENV"
+
+
+      # =====================================================
+      # Configure kernel if possible
+      # =====================================================
+
+      - name: Configure kernel
+        if: env.DEFCONFIG != ''
+        working-directory: kernel
+        run: |
+
+          rm -rf out
+          mkdir -p out
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            "$DEFCONFIG"
+
+
+      # =====================================================
+      # Show NetHunter-related configuration
+      # =====================================================
+
+      - name: Analyze kernel configuration
+        if: env.DEFCONFIG != ''
+        working-directory: kernel
+        run: |
+
+          mkdir -p ../analysis
+
+          cp out/.config \
+            ../analysis/kernel.config
+
+          grep -E \
+            'CONFIG_(ANDROID|USB|WIRELESS|WLAN|BT|BLUETOOTH|HID|NET|CAN|NFS|MODULES)' \
+            out/.config \
+            > ../analysis/relevant-config.txt \
+            || true
+
+          cat ../analysis/relevant-config.txt
+
+
+      # =====================================================
+      # Build kernel
+      # =====================================================
+
+      - name: Build kernel
+        if: env.DEFCONFIG != ''
+        working-directory: kernel
+        run: |
+
+          set -o pipefail
+
+          make \
+            -j"$(nproc)" \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            2>&1 | tee ../analysis/build.log
+
+
+      # =====================================================
+      # Collect kernel output
+      # =====================================================
+
+      - name: Collect build output
+        run: |
+
+          mkdir -p output
+
+          if [ -d kernel/out/arch/arm64/boot ]; then
+
+            cp -a \
+              kernel/out/arch/arm64/boot \
+              output/kernel-boot
+
+          fi
+
+
+          echo "Kernel images:"
+          find output/kernel-boot \
+            -type f \
+            2>/dev/null \
+            | sort \
+            || true
+
+
+      # =====================================================
+      # Collect DTB / DTBO
+      # =====================================================
+
+      - name: Collect DTB and DTBO
+        run: |
+
+          mkdir -p output/dtb
+
+          find kernel/out \
+            -type f \
+            \( \
+              -name '*.dtb' \
+              -o \
+              -name '*.dtbo' \
+            \) \
+            -exec cp {} output/dtb/ \; \
+            2>/dev/null \
+            || true
+
+          echo "DTB/DTBO:"
+          find output/dtb \
+            -type f \
+            | sort \
+            || true
+
+
+      # =====================================================
+      # Collect modules
+      # =====================================================
+
+      - name: Collect modules
+        run: |
+
+          mkdir -p output/modules
+
+          find kernel/out \
+            -type f \
+            -name '*.ko' \
+            -exec cp {} output/modules/ \; \
+            2>/dev/null \
+            || true
+
+          echo "Modules:"
+          find output/modules \
+            -type f \
+            | sort \
+            || true
+
+
+      # =====================================================
+      # Collect source metadata
+      # =====================================================
+
+      - name: Generate metadata
+        run: |
+
+          mkdir -p output/metadata
+
+          {
+            echo "Device: Samsung Galaxy S10+"
+            echo "Codename: beyond2lte"
+            echo "Architecture: arm64"
+            echo
+            echo "NetHunter repository:"
+            echo "${KERNEL_REPO}"
+            echo "Branch:"
+            echo "${KERNEL_BRANCH}"
+            echo
+            echo "NetHunter commit:"
+            git -C kernel rev-parse HEAD
+            echo
+            echo "FreeRunner repository:"
+            echo "${FREERUNNER_REPO}"
+            echo
+            echo "FreeRunner commit:"
+            git -C freerunner rev-parse HEAD
+            echo
+            echo "Defconfig:"
+            echo "${DEFCONFIG:-NOT-DETECTED}"
+            echo
+            echo "Build date:"
+            date -u
+          } > output/metadata/build-info.txt
+
+
+      # =====================================================
+      # Copy analysis
+      # =====================================================
+
+      - name: Copy analysis
+        run: |
+
+          mkdir -p output/analysis
+
+          cp -a analysis/. \
+            output/analysis/
+
+
+      # =====================================================
+      # Create source analysis archive
+      # =====================================================
+
+      - name: Create source analysis archive
+        run: |
+
+          tar -czf \
+            NetHunter-build-analysis.tar.gz \
+            output/
+
+
+      # =====================================================
+      # Upload EVERYTHING
+      # =====================================================
+
+      - name: Upload complete build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetHunter-beyond2lte-analysis
+          path: |
+            output/
+            NetHunter-build-analysis.tar.gz
+          if-no-files-found: warn
+          retention-days: 30
