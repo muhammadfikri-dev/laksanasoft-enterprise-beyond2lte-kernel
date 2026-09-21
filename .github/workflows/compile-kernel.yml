@@ -1,105 +1,107 @@
-name: Build Laksanasoft Enterprise Kernel
+name: Build FreeRunnerKernel (kernel-16 / LineageOS 23)
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
-
-permissions:
-  contents: write
+  push:
+    branches:
+      - kernel-16
 
 jobs:
   build:
-    name: Compile Enterprise Kernel (beyond2lte)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@v10
+        with:
+          root-reserve-mb: 8192
+          temp-reserve-mb: 4096
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
 
-      - name: Free Disk Space
+      - name: Install Dependencies
         run: |
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt-get update
+          sudo apt-get upgrade -y
+          sudo apt-get install -y \
+            git bc bison flex build-essential libssl-dev libncurses-dev \
+            libtinfo-dev zip unzip lz4 ccache libglib2.0-0 python3 \
+            python-is-python3 openjdk-11-jdk clang llvm lld gawk wget \
+            curl xz-utils libelf-dev
 
-      - name: Install Build Dependencies
+      - name: Clone FreeRunnerKernel Source
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends \
-            build-essential bc bison flex libssl-dev libelf-dev libncurses5-dev \
-            zip unzip curl wget git ca-certificates libarchive-tools xz-utils \
-            gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi \
-            binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi
+          git clone --recurse-submodules https://github.com/LeDrew2017/FreeRunnerKernel.git -b kernel-16 kernel-source
 
-      - name: Download ZyC Clang 23 Toolchain (Native Polly Support)
+      - name: Download Proton-Clang & GCC Toolchains
         run: |
-          echo "[*] Downloading ZyC Clang 23 with native LLVM Polly..."
           mkdir -p toolchain
-          wget -q -O clang.tar.gz https://github.com/ZyCromerZ/Clang/releases/download/23.0.0git-20260130-release/Clang-23.0.0git-20260130.tar.gz
-          tar -xzf clang.tar.gz -C toolchain
-          rm -f clang.tar.gz
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchain/proton-clang
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain/gcc64
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git toolchain/gcc32
 
-      - name: Build Laksanasoft Enterprise Kernel
+      - name: Clone AnyKernel3
         run: |
-          chmod +x build.sh scripts/apply_drivers.sh
-          ./build.sh
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
 
-      - name: Upload Kernel Zip Artifact
+      - name: Compile Kernel
+        run: |
+          cd kernel-source
+          
+          export PATH="$(pwd)/../toolchain/proton-clang/bin:$(pwd)/../toolchain/gcc64/bin:$(pwd)/../toolchain/gcc32/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export HEADER_ARCH=arm64
+          
+          export CC=clang
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          # Menentukan defconfig untuk beyond2lte (S10+)
+          DEFCONFIG=""
+          if [ -f "arch/arm64/configs/beyond2lte_defconfig" ]; then
+            DEFCONFIG="beyond2lte_defconfig"
+          elif [ -f "arch/arm64/configs/exynos9820-beyond2lte_defconfig" ]; then
+            DEFCONFIG="exynos9820-beyond2lte_defconfig"
+          elif [ -f "arch/arm64/configs/exynos9820_defconfig" ]; then
+            DEFCONFIG="exynos9820_defconfig"
+          else
+            DEFCONFIG=$(find arch/arm64/configs/ -name "*beyond2lte*" -o -name "*exynos9820*" | head -n 1 | xargs basename)
+          fi
+
+          echo "Menggunakan Config: $DEFCONFIG"
+          make O=out $DEFCONFIG
+          make -j$(nproc --all) O=out
+
+      - name: Package to AnyKernel3 Zip
+        run: |
+          cd AnyKernel3
+          
+          if [ -f "../kernel-source/out/arch/arm64/boot/Image.lz4" ]; then
+            cp ../kernel-source/out/arch/arm64/boot/Image.lz4 .
+          elif [ -f "../kernel-source/out/arch/arm64/boot/Image" ]; then
+            cp ../kernel-source/out/arch/arm64/boot/Image .
+          fi
+
+          if [ -f "../kernel-source/out/arch/arm64/boot/dtb.img" ]; then
+            cp ../kernel-source/out/arch/arm64/boot/dtb.img dtb
+          elif [ -f "../kernel-source/out/arch/arm64/boot/dtb" ]; then
+            cp ../kernel-source/out/arch/arm64/boot/dtb .
+          fi
+
+          if [ -f "../kernel-source/out/arch/arm64/boot/dtbo.img" ]; then
+            cp ../kernel-source/out/arch/arm64/boot/dtbo.img .
+          fi
+
+          ZIP_NAME="FreeRunnerKernel-Lineage23-beyond2lte-$(date +%Y%m%d-%H%M).zip"
+          zip -r9 "$ZIP_NAME" * -x .git README.md *placeholder
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Laksanasoft-Enterprise-beyond2lte-Kernel-Polly
-          path: releases/*.zip
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Publish Automated GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ZIP_FILE=$(ls releases/*.zip | head -n 1)
-          ZIP_NAME=$(basename "$ZIP_FILE")
-          TAG="v1.0-polly"
-          
-          cat << 'EOF' > release_notes.md
-          ## ⚡ Laksanasoft Enterprise Kernel (Polly Edition) for Samsung Galaxy S10+ (beyond2lte)
-          
-          ### 🚀 Fitur & Driver Lengkap Teknisi + Optimasi LLVM Polly:
-          - **SoC**: Samsung Exynos 9820 (Kernel Linux 4.14.356)
-          - **Compiler**: ZyC Clang 23.0.0git + LLVM Polly Native Loop Optimizer
-          - **Brand**: Laksanasoft Enterprise Edition (Polly)
-          - **Root & Stealth**: KernelSU-Next v3.3.0 + SuSFS v2.2.0
-          - **USB Serial / Hardware Hacking**:
-            - WCH CH340 / CH341 (Arduino & USB-TTL murah)
-            - Silicon Labs CP2102 / CP2104 (ESP32 / NodeMCU)
-            - FTDI FT232R
-            - Prolific PL2303
-            - Qualcomm Diag Mode (900E / 901D serial ports)
-            - USB CDC-ACM (Proxmark3, Flipper Zero, Teensy)
-          - **Smartphone Flashing Support**:
-            - Android Fastboot, MediaTek BROM (mtkclient), Qualcomm EDL 9008, Samsung Download Mode
-            - Apple iOS Normal, Recovery Mode, dan DFU Mode (idevicerestore, usbmuxd, checkra1n, palera1n)
-          - **Wi-Fi Packet Injection & Monitor Mode**:
-            - Atheros AR9271 (ath9k_htc), AR9170 (carl9170)
-            - Realtek RTL8812AU / RTL8814AU (88xxau - Dual Band)
-            - Realtek RTL8187L, RTL8xxxu
-            - Ralink RT2800USB / RT3070 / RT5370 (rt2x00 aktif!)
-            - MediaTek MT7601U
-          - **USB Arsenal & NetHunter**:
-            - BadUSB HID keyboard/mouse emulation
-            - USB Mass Storage (ISO bootable CD-ROM)
-            - RNDIS USB Ethernet
-          
-          ### 📦 Cara Flash:
-          1. Masuk ke TWRP Recovery.
-          2. Flash file zip AnyKernel3.
-          3. Reboot sistem.
-          EOF
-          
-          gh release delete "$TAG" --yes --cleanup-tag || true
-          
-          echo "[*] Publishing GitHub Release $TAG..."
-          gh release create "$TAG" "$ZIP_FILE" \
-            --title "⚡ Laksanasoft Enterprise Kernel $TAG (Polly Edition - beyond2lte)" \
-            --notes-file release_notes.md
+          name: ${{ env.ZIP_NAME }}
+          path: AnyKernel3/${{ env.ZIP_NAME }}
