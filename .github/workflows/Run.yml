@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout Root Repository
+        uses: actions/checkout@v4
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
@@ -39,15 +42,18 @@ jobs:
 
       - name: Prepare Root Custom Defconfig & Append Custom Configs
         run: |
-          cd kernel-source
-          
-          if [ -f "../defconf" ]; then
-            cp ../defconf arch/arm64/configs/custom_root_defconfig
+          # Cek lokasi file defconf di workspace root
+          if [ -f "$GITHUB_WORKSPACE/defconf" ]; then
+            cp "$GITHUB_WORKSPACE/defconf" kernel-source/arch/arm64/configs/custom_root_defconfig
           elif [ -f "defconf" ]; then
-            cp defconf arch/arm64/configs/custom_root_defconfig
+            cp defconf kernel-source/arch/arm64/configs/custom_root_defconfig
           else
-            echo "ERROR: File defconf tidak ditemukan di root repository!"
-            exit 1
+            echo "File defconf tidak ditemukan di root, menggunakan fallback exynos9820_defconfig bawaan kernel..."
+            if [ -f "kernel-source/arch/arm64/configs/beyond2lte_defconfig" ]; then
+              cp kernel-source/arch/arm64/configs/beyond2lte_defconfig kernel-source/arch/arm64/configs/custom_root_defconfig
+            elif [ -f "kernel-source/arch/arm64/configs/exynos9820_defconfig" ]; then
+              cp kernel-source/arch/arm64/configs/exynos9820_defconfig kernel-source/arch/arm64/configs/custom_root_defconfig
+            fi
           fi
 
           {
@@ -107,9 +113,7 @@ jobs:
             echo "CONFIG_USB_CONFIGFS_F_DM=y"
             echo "CONFIG_USB_CONFIGFS_F_CONN_GADGET=y"
             echo "CONFIG_USB_CONFIGFS_F_SS_MON_GADGET=y"
-            echo "# CONFIG_USB_G_ANDROID is not set"
-            echo "# CONFIG_USB_ANDROID_SAMSUNG_COMPOSITE is not set"
-          } >> arch/arm64/configs/custom_root_defconfig
+          } >> kernel-source/arch/arm64/configs/custom_root_defconfig
 
           echo "TARGET_DEFCONFIG=custom_root_defconfig" >> $GITHUB_ENV
 
