@@ -17,7 +17,6 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get upgrade -y
           sudo apt-get install -y \
             git bc bison flex build-essential libssl-dev libncurses-dev \
             libtinfo-dev zip unzip lz4 ccache libglib2.0-0 python3 \
