@@ -1,1 +1,66 @@
+name: Build NetHunter Kernel Exynos9820 (beyond2lte)
 
+on:
+  workflow_dispatch:
+    inputs:
+      device_variant:
+        description: 'Device Codename (e.g., beyond2lte)'
+        required: true
+        default: 'beyond2lte'
+        type: string
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Maximize Build Disk Space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 16384
+          swap-size-mb: 8192
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc bison flex build-essential libssl-dev libelf-dev \
+            git curl wget python3 python-is-python3 cpio zip unzip \
+            libncurses5-dev zlib1g-dev libstdc++6
+
+      - name: Clone NetHunter Kernel Source (Recursive)
+        run: |
+          git clone --recurse-submodules https://github.com/v0lk3n/nethunter_kernel_samsung_exynos9820.git -b nethunter-lineage-23.2 kernel-src
+
+      - name: Setup Configuration & Build NetHunter
+        working-directory: ./kernel-src
+        run: |
+          # Masuk ke direktori builder NetHunter sesuai struktur repository v0lk3n
+          cd kali-nethunter-kernel-builder
+          
+          # Menyalin file konfigurasi lokal untuk device target (beyond2lte)
+          if [ -f "../nh_files/local.config.${{ inputs.device_variant }}" ]; then
+              cp ../nh_files/local.config.${{ inputs.device_variant }} local.config
+          elif [ -f "../nh_files/local.config" ]; then
+              cp ../nh_files/local.config local.config
+          else
+              echo "CONFIG=nethunter_${{ inputs.device_variant }}_defconfig" > local.config
+          fi
+
+          # Menjalankan skrip otomatis bawaan repository v0lk3n
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Archive Generated Kernel / Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetHunter-Kernel-${{ inputs.device_variant }}-Exynos9820
+          path: |
+            kernel-src/**/Image
+            kernel-src/**/Image.gz
+            kernel-src/**/*.zip
+            kernel-src/**/dtb.img
+            kernel-src/**/dtbo.img
