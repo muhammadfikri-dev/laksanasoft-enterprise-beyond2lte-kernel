@@ -1,156 +1,43 @@
-name: Build FreeRunnerKernel (LineageOS 23 / beyond2lte)
+name: Compile FreeRunnerKernel
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - kernel-16
+    inputs:
+      build_reason:
+        description: 'Tujuan Kompilasi (opsional)'
+        required: false
+        default: 'Re-build kernel-16'
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-
+  build-kernel:
+    name: Build Custom Kernel
+    runs-on: ubuntu-22.04
+    
     steps:
-      - name: Checkout Repository
+      - name: Sinkronisasi Repositori Target
         uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+          fetch-depth: 1
 
-      - name: Install Dependencies
+      - name: Inisialisasi Dependensi Lingkungan (Environment)
         run: |
-          sudo apt-get install -y \
-            git bc bison flex build-essential libssl-dev libncurses-dev \
-            libtinfo-dev zip unzip lz4 ccache libglib2.0-0 python3 \
-            python-is-python3 openjdk-11-jdk clang llvm lld gawk wget \
-            curl xz-utils libelf-dev
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
+          clang lld git curl gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi cgpt \
+          cpio wget zip unzip zstd
 
-      - name: Clone FreeRunnerKernel Source
+      - name: Eksekusi Otomatisasi Skrip (build.sh)
         run: |
-          git clone --recurse-submodules https://github.com/LeDrew2017/FreeRunnerKernel.git -b kernel-16 kernel-source
+          chmod +x build.sh
+          bash build.sh
 
-      - name: Download Toolchains (Proton-Clang & GCC)
-        run: |
-          mkdir -p toolchain
-          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchain/proton-clang
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain/gcc64
-          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git toolchain/gcc32
-
-      - name: Clone Official AnyKernel3
-        run: |
-          git clone --depth=1 https://github.com/LeDrew2017/Anykernel.git AnyKernel3
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-
-      - name: Prepare Defconfig and Custom Fragment
-        run: |
-          cd kernel-source
-
-          mkdir -p arch/arm64/configs/
-          {
-            echo "CONFIG_CONFIGFS_FS=y"
-            echo "CONFIG_USB_GADGET=y"
-            echo "CONFIG_USB_CONFIGFS=y"
-            echo "CONFIG_USB_CONFIGFS_UEVENT=y"
-            echo "CONFIG_USB_F_FS=y"
-            echo "CONFIG_USB_CONFIGFS_F_FS=y"
-            echo "CONFIG_USB_GADGETFS=y"
-            echo "CONFIG_USB_F_HID=y"
-            echo "CONFIG_USB_CONFIGFS_F_HID=y"
-            echo "CONFIG_USB_G_HID=y"
-            echo "CONFIG_HID_GENERIC=y"
-            echo "CONFIG_UHID=y"
-            echo "CONFIG_USB_F_CCID=y"
-            echo "CONFIG_USB_CONFIGFS_F_CCID=y"
-            echo "CONFIG_VIDEO_DEV=y"
-            echo "CONFIG_VIDEO_V4L2=y"
-            echo "CONFIG_USB_F_UVC=y"
-            echo "CONFIG_USB_CONFIGFS_F_UVC=y"
-            echo "CONFIG_SND=y"
-            echo "CONFIG_SND_PCM=y"
-            echo "CONFIG_USB_F_UAC1=y"
-            echo "CONFIG_USB_CONFIGFS_F_UAC1=y"
-            echo "CONFIG_USB_F_UAC2=y"
-            echo "CONFIG_USB_CONFIGFS_F_UAC2=y"
-            echo "CONFIG_USB_F_MASS_STORAGE=y"
-            echo "CONFIG_USB_CONFIGFS_MASS_STORAGE=y"
-            echo "CONFIG_USB_F_RNDIS=y"
-            echo "CONFIG_USB_CONFIGFS_RNDIS=y"
-            echo "CONFIG_USB_F_ECM=y"
-            echo "CONFIG_USB_CONFIGFS_ECM=y"
-            echo "CONFIG_USB_F_SUBSET=y"
-            echo "CONFIG_USB_CONFIGFS_ECM_SUBSET=y"
-            echo "CONFIG_USB_F_NCM=y"
-            echo "CONFIG_USB_CONFIGFS_NCM=y"
-            echo "CONFIG_USB_F_EEM=y"
-            echo "CONFIG_USB_CONFIGFS_EEM=y"
-            echo "CONFIG_USB_F_SERIAL=y"
-            echo "CONFIG_USB_F_ACM=y"
-            echo "CONFIG_USB_CONFIGFS_SERIAL=y"
-            echo "CONFIG_USB_CONFIGFS_ACM=y"
-            echo "CONFIG_USB_ACM=y"
-            echo "CONFIG_USB_CONFIGFS_OBEX=y"
-            echo "CONFIG_USB_F_MIDI=y"
-            echo "CONFIG_USB_CONFIGFS_F_MIDI=y"
-            echo "CONFIG_USB_F_MTP=y"
-            echo "CONFIG_USB_CONFIGFS_F_MTP=y"
-            echo "CONFIG_USB_F_PTP=y"
-            echo "CONFIG_USB_CONFIGFS_F_PTP=y"
-            echo "CONFIG_USB_CONFIGFS_F_ADB=y"
-            echo "CONFIG_CRYPTO=y"
-            echo "CONFIG_CRYPTO_RSA=y"
-            echo "CONFIG_CRYPTO_SHA256=y"
-            echo "CONFIG_CRYPTO_AES=y"
-            echo "CONFIG_USB_CONFIGFS_F_DM=y"
-            echo "CONFIG_USB_CONFIGFS_F_CONN_GADGET=y"
-            echo "CONFIG_USB_CONFIGFS_F_SS_MON_GADGET=y"
-          } > arch/arm64/configs/custom_gadget.config
-
-      - name: Compile Kernel
-        run: |
-          cd kernel-source
-          mkdir -p out/beyond2lte
-
-          export PATH="$(pwd)/../toolchain/proton-clang/bin:$(pwd)/../toolchain/gcc64/bin:$(pwd)/../toolchain/gcc32/bin:$PATH"
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export HEADER_ARCH=arm64
-          export CC=clang
-          export CROSS_COMPILE=aarch64-linux-android-
-          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-
-          # Memuat defconfig dari subfolder exynos/
-          if [ -f "arch/arm64/configs/exynos/exynos9820-beyond2lte_defconfig" ]; then
-            make O=out/beyond2lte exynos/exynos9820-beyond2lte_defconfig
-          elif [ -f "arch/arm64/configs/exynos9820-beyond2lte_defconfig" ]; then
-            make O=out/beyond2lte exynos9820-beyond2lte_defconfig
-          else
-            TARGET_CONFIG=$(find arch/arm64/configs/ -name "*beyond2lte_defconfig" | sed 's|arch/arm64/configs/||')
-            make O=out/beyond2lte "$TARGET_CONFIG"
-          fi
-
-          # Menggabungkan fragment custom_gadget.config
-          ./scripts/kconfig/merge_config.sh -O out/beyond2lte out/beyond2lte/.config arch/arm64/configs/custom_gadget.config
-          make O=out/beyond2lte olddefconfig
-
-          # Kompilasi
-          make -j$(nproc --all) O=out/beyond2lte
-
-          if [ ! -f "out/beyond2lte/arch/arm64/boot/Image" ]; then
-            echo "ERROR: File Image tidak ditemukan! Kompilasi gagal."
-            exit 1
-          fi
-
-      - name: Package to AnyKernel3 Zip
-        run: |
-          cd AnyKernel3
-          
-          cp ../kernel-source/out/beyond2lte/arch/arm64/boot/Image .
-
-          ZIP_NAME="FreeRunnerKernel-beyond2lte-Lineage23-$(date +%Y%m%d-%H%M).zip"
-          zip -r9 "$ZIP_NAME" * -x .git\* README.md\*
-          
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-
-      - name: Upload Artifact
+      - name: Ekstraksi Output (AnyKernel3 / Flashable Zip)
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ZIP_NAME }}
-          path: AnyKernel3/${{ env.ZIP_NAME }}
+          name: FreeRunnerKernel-Build-${{ github.run_id }}
+          path: |
+            *.zip
+            AnyKernel3/*.zip
+            out/**/*.zip
+          retention-days: 7
