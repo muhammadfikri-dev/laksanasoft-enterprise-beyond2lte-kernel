@@ -1,66 +1,109 @@
-name: Build NetHunter Kernel Exynos9820 (beyond2lte)
+name: Compile LineageOS 23.2 Kernel for Samsung S10+ (beyond2lte)
 
 on:
   workflow_dispatch:
-    inputs:
-      device_variant:
-        description: 'Device Codename (e.g., beyond2lte)'
-        required: true
-        default: 'beyond2lte'
-        type: string
+  push:
+    branches:
+      - main
+      - master
 
 jobs:
-  build-kernel:
+  build:
     runs-on: ubuntu-22.04
+
     steps:
-      - name: Maximize Build Disk Space
-        uses: easimon/maximize-build-space@master
+      - name: Maximize Build Space
+        uses: easimon/maximize-build-space@v10
         with:
-          root-reserve-mb: 16384
-          swap-size-mb: 8192
+          root-reserve-mb: 8192
+          temp-reserve-mb: 4096
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
-          remove-codeql: 'true'
 
-      - name: Install System Dependencies
+      - name: Install Build Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            bc bison flex build-essential libssl-dev libelf-dev \
-            git curl wget python3 python-is-python3 cpio zip unzip \
-            libncurses5-dev zlib1g-dev libstdc++6
+            git bc bison flex build-essential libssl-dev libncurses5-dev \
+            libncurses-dev libtinfo5 zip unzip lz4 ccache libglib2.0-0 \
+            python3 python2 python-is-python3 openjdk-11-jdk clang llvm \
+            liblld-dev lld gawk wget curl xz-utils
 
-      - name: Clone NetHunter Kernel Source (Recursive)
+      - name: Clone Kernel Source
         run: |
-          git clone --recurse-submodules https://github.com/v0lk3n/nethunter_kernel_samsung_exynos9820.git -b nethunter-lineage-23.2 kernel-src
+          git clone --recurse-submodules https://github.com/v0lk3n/nethunter_kernel_samsung_exynos9820.git -b nethunter-lineage-23.2 kernel-source
 
-      - name: Setup Configuration & Build NetHunter
-        working-directory: ./kernel-src
+      - name: Download Toolchain (Proton Clang & GCC)
         run: |
-          # Masuk ke direktori builder NetHunter sesuai struktur repository v0lk3n
-          cd kali-nethunter-kernel-builder
+          mkdir -p toolchain
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang.git toolchain/proton-clang
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain/gcc64
+          git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_arm_arm-linux-androideabi-4.9.git toolchain/gcc32
+
+      - name: Clone AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+
+      - name: Compile Kernel
+        run: |
+          cd kernel-source
           
-          # Menyalin file konfigurasi lokal untuk device target (beyond2lte)
-          if [ -f "../nh_files/local.config.${{ inputs.device_variant }}" ]; then
-              cp ../nh_files/local.config.${{ inputs.device_variant }} local.config
-          elif [ -f "../nh_files/local.config" ]; then
-              cp ../nh_files/local.config local.config
+          export PATH="$(pwd)/../toolchain/proton-clang/bin:$(pwd)/../toolchain/gcc64/bin:$(pwd)/../toolchain/gcc32/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export HEADER_ARCH=arm64
+          
+          export CC=clang
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CROSS_COMPILE_ARM32=arm-linux-androideabi-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+
+          # Check available defconfigs for beyond2lte or exynos9820
+          DEFCONFIG=""
+          if [ -f "arch/arm64/configs/beyond2lte_defconfig" ]; then
+            DEFCONFIG="beyond2lte_defconfig"
+          elif [ -f "arch/arm64/configs/exynos9820-beyond2lte_defconfig" ]; then
+            DEFCONFIG="exynos9820-beyond2lte_defconfig"
+          elif [ -f "arch/arm64/configs/exynos9820_defconfig" ]; then
+            DEFCONFIG="exynos9820_defconfig"
           else
-              echo "CONFIG=nethunter_${{ inputs.device_variant }}_defconfig" > local.config
+            DEFCONFIG=$(find arch/arm64/configs/ -name "*beyond2lte*" -o -name "*exynos9820*" | head -n 1 | xargs basename)
           fi
 
-          # Menjalankan skrip otomatis bawaan repository v0lk3n
-          chmod +x build.sh
-          ./build.sh
+          echo "Using Defconfig: $DEFCONFIG"
+          make O=out $DEFCONFIG
+          make -j$(nproc --all) O=out
 
-      - name: Archive Generated Kernel / Artifacts
+      - name: Prepare Flashable AnyKernel3 Zip
+        run: |
+          cd AnyKernel3
+          
+          # Copy compiled Image / Image.lz4 / dtb if available
+          if [ -f "../kernel-source/out/arch/arm64/boot/Image.lz4" ]; then
+            cp ../kernel-source/out/arch/arm64/boot/Image.lz4 .
+          elif [ -f "../kernel-source/out/arch/arm64/boot/Image" ]; then
+            cp ../kernel-source/out/arch/arm64/boot/Image .
+          fi
+
+          if [ -f "../kernel-source/out/arch/arm64/boot/dtb.img" ]; then
+            cp ../kernel-source/out/arch/arm64/boot/dtb.img dtb
+          elif [ -f "../kernel-source/out/arch/arm64/boot/dtb" ]; then
+            cp ../kernel-source/out/arch/arm64/boot/dtb .
+          fi
+
+          if [ -f "../kernel-source/out/arch/arm64/boot/dtbo.img" ]; then
+            cp ../kernel-source/out/arch/arm64/boot/dtbo.img .
+          fi
+
+          # Create Zip
+          ZIP_NAME="NetHunter-Kernel-Lineage23.2-beyond2lte-$(date +%Y%m%d-%H%M).zip"
+          zip -r9 "$ZIP_NAME" * -x .git README.md *placeholder
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Upload Flashable Kernel Zip
         uses: actions/upload-artifact@v4
         with:
-          name: NetHunter-Kernel-${{ inputs.device_variant }}-Exynos9820
-          path: |
-            kernel-src/**/Image
-            kernel-src/**/Image.gz
-            kernel-src/**/*.zip
-            kernel-src/**/dtb.img
-            kernel-src/**/dtbo.img
+          name: ${{ env.ZIP_NAME }}
+          path: AnyKernel3/${{ env.ZIP_NAME }}
