@@ -1,43 +1,570 @@
-name: Compile FreeRunnerKernel
+name: NetHunter Kernel - Samsung Galaxy S10+
 
 on:
   workflow_dispatch:
-    inputs:
-      build_reason:
-        description: 'Tujuan Kompilasi (opsional)'
-        required: false
-        default: 'Re-build kernel-16'
+
+permissions:
+  contents: read
+
+env:
+  KERNEL_REPO: https://github.com/v0lk3n/nethunter_kernel_samsung_exynos9820.git
+  KERNEL_BRANCH: nethunter-lineage-23.2
+
+  DEVICE: beyond2lte
+  ARCH: arm64
+
+  # Toolchain
+  LLVM_VERSION: "14"
 
 jobs:
+
+  # ==========================================================
+  # BUILD KERNEL
+  # ==========================================================
+
   build-kernel:
-    name: Build Custom Kernel
+
+    name: Build Exynos9820 NetHunter Kernel
+
     runs-on: ubuntu-22.04
-    
+
     steps:
-      - name: Sinkronisasi Repositori Target
+
+      # ------------------------------------------------------
+      # Checkout builder repository
+      # ------------------------------------------------------
+
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
-          fetch-depth: 1
 
-      - name: Inisialisasi Dependensi Lingkungan (Environment)
+
+      # ------------------------------------------------------
+      # Install dependencies
+      # ------------------------------------------------------
+
+      - name: Install dependencies
         run: |
+
           sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
-          clang lld git curl gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi cgpt \
-          cpio wget zip unzip zstd
 
-      - name: Eksekusi Otomatisasi Skrip (build.sh)
+          sudo apt-get install -y \
+            git \
+            wget \
+            curl \
+            bc \
+            bison \
+            flex \
+            build-essential \
+            zip \
+            unzip \
+            cpio \
+            rsync \
+            python3 \
+            python3-pip \
+            python3-setuptools \
+            libssl-dev \
+            libelf-dev \
+            libncurses5-dev \
+            libncurses-dev \
+            device-tree-compiler \
+            gcc \
+            g++ \
+            gcc-aarch64-linux-gnu \
+            binutils-aarch64-linux-gnu \
+            clang \
+            lld \
+            llvm \
+            dwarves
+
+
+      # ------------------------------------------------------
+      # Clone kernel
+      # ------------------------------------------------------
+
+      - name: Clone kernel source
         run: |
-          chmod +x build.sh
-          bash build.sh
 
-      - name: Ekstraksi Output (AnyKernel3 / Flashable Zip)
+          git clone \
+            --recursive \
+            --branch "${KERNEL_BRANCH}" \
+            "${KERNEL_REPO}" \
+            kernel
+
+          cd kernel
+
+          git submodule sync --recursive
+          git submodule update --init --recursive
+
+
+      # ------------------------------------------------------
+      # Kernel information
+      # ------------------------------------------------------
+
+      - name: Kernel information
+        working-directory: kernel
+        run: |
+
+          echo "=========================================="
+          echo "KERNEL INFORMATION"
+          echo "=========================================="
+
+          echo "Commit:"
+          git rev-parse HEAD
+
+          echo
+          echo "Branch:"
+          git branch --show-current
+
+          echo
+          echo "Kernel version:"
+          make kernelversion || true
+
+          echo
+          echo "Architecture:"
+          uname -m
+
+          echo
+          echo "Defconfigs:"
+          find arch/arm64/configs \
+            -type f \
+            | grep -Ei \
+              'beyond|exynos9820|s10' \
+            | sort || true
+
+
+      # ------------------------------------------------------
+      # Detect defconfig
+      # ------------------------------------------------------
+
+      - name: Detect defconfig
+        working-directory: kernel
+        shell: bash
+        run: |
+
+          set -e
+
+          DEFCONFIG=""
+
+          POSSIBLE_CONFIGS=(
+
+            "beyond2lte_defconfig"
+            "beyond2lte_kor_defconfig"
+            "beyond2lte_eur_defconfig"
+            "exynos9820_defconfig"
+
+          )
+
+          for cfg in "${POSSIBLE_CONFIGS[@]}"
+          do
+
+            if [ -f "arch/arm64/configs/$cfg" ]; then
+
+              DEFCONFIG="$cfg"
+
+              break
+
+            fi
+
+          done
+
+          if [ -z "$DEFCONFIG" ]; then
+
+            echo "::error::Unable to find device defconfig."
+
+            echo
+            echo "Available configs:"
+
+            find arch/arm64/configs \
+              -type f \
+              | sort
+
+            exit 1
+
+          fi
+
+          echo "Using:"
+          echo "$DEFCONFIG"
+
+          echo "DEFCONFIG=$DEFCONFIG" >> "$GITHUB_ENV"
+
+
+      # ------------------------------------------------------
+      # Prepare output
+      # ------------------------------------------------------
+
+      - name: Prepare output
+        working-directory: kernel
+        run: |
+
+          rm -rf out
+
+          mkdir -p out
+
+
+      # ------------------------------------------------------
+      # Kernel configuration
+      # ------------------------------------------------------
+
+      - name: Configure kernel
+        working-directory: kernel
+        run: |
+
+          make \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            "$DEFCONFIG"
+
+
+      # ------------------------------------------------------
+      # Display configuration
+      # ------------------------------------------------------
+
+      - name: Show kernel configuration
+        working-directory: kernel
+        run: |
+
+          echo "=========================================="
+          echo "IMPORTANT CONFIGURATION"
+          echo "=========================================="
+
+          grep -E \
+            'CONFIG_(ANDROID|USB|WIRELESS|BT|NET|CAN|NFS)' \
+            out/.config \
+            || true
+
+
+      # ------------------------------------------------------
+      # Build kernel
+      # ------------------------------------------------------
+
+      - name: Build kernel
+        working-directory: kernel
+        shell: bash
+        run: |
+
+          set -e
+
+          make \
+            -j"$(nproc)" \
+            O=out \
+            ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1
+
+
+      # ------------------------------------------------------
+      # Find kernel images
+      # ------------------------------------------------------
+
+      - name: Find kernel images
+        working-directory: kernel
+        run: |
+
+          echo "=========================================="
+          echo "KERNEL OUTPUT"
+          echo "=========================================="
+
+          find out/arch/arm64/boot \
+            -type f \
+            -maxdepth 3 \
+            -print \
+            | sort
+
+
+      # ------------------------------------------------------
+      # Collect build output
+      # ------------------------------------------------------
+
+      - name: Collect kernel
+        working-directory: kernel
+        run: |
+
+          mkdir -p ../release
+
+          # Kernel images
+
+          for FILE in \
+            Image \
+            Image.gz \
+            Image.gz-dtb \
+            Image.lz4 \
+            Image.lz4-dtb
+          do
+
+            if [ -f "out/arch/arm64/boot/$FILE" ]; then
+
+              cp \
+                "out/arch/arm64/boot/$FILE" \
+                "../release/$FILE"
+
+            fi
+
+          done
+
+
+      # ------------------------------------------------------
+      # Collect DTB
+      # ------------------------------------------------------
+
+      - name: Collect DTB
+        working-directory: kernel
+        run: |
+
+          mkdir -p ../release/dtb
+
+          find out/arch/arm64/boot \
+            -type f \
+            \( \
+              -name "*.dtb" \
+              -o \
+              -name "*.dtbo" \
+            \) \
+            -exec cp {} ../release/dtb/ \;
+
+          echo "DTB files:"
+
+          find ../release/dtb \
+            -type f \
+            -print \
+            || true
+
+
+      # ------------------------------------------------------
+      # Collect modules
+      # ------------------------------------------------------
+
+      - name: Collect modules
+        working-directory: kernel
+        run: |
+
+          mkdir -p ../release/modules
+
+          find out \
+            -type f \
+            -name "*.ko" \
+            -exec cp {} ../release/modules/ \;
+
+          echo "Modules:"
+
+          find ../release/modules \
+            -type f \
+            -print \
+            || true
+
+
+      # ------------------------------------------------------
+      # Save configuration
+      # ------------------------------------------------------
+
+      - name: Save configuration
+        working-directory: kernel
+        run: |
+
+          cp \
+            out/.config \
+            ../release/kernel.config
+
+
+      # ------------------------------------------------------
+      # Save kernel metadata
+      # ------------------------------------------------------
+
+      - name: Generate build information
+        working-directory: kernel
+        run: |
+
+          {
+
+            echo "Device: Samsung Galaxy S10+"
+            echo "Codename: beyond2lte"
+            echo "Kernel repository: ${KERNEL_REPO}"
+            echo "Kernel branch: ${KERNEL_BRANCH}"
+            echo "Kernel commit:"
+            git rev-parse HEAD
+
+            echo
+            echo "Defconfig:"
+            echo "${DEFCONFIG}"
+
+            echo
+            echo "Build date:"
+            date -u
+
+          } > ../release/build-info.txt
+
+
+      # ======================================================
+      # ANYKERNEL3
+      # ======================================================
+
+      - name: Clone AnyKernel3
+        run: |
+
+          git clone \
+            --depth=1 \
+            https://github.com/osm0sis/AnyKernel3.git \
+            anykernel3
+
+
+      # ------------------------------------------------------
+      # Prepare AnyKernel3
+      # ------------------------------------------------------
+
+      - name: Prepare AnyKernel3
+        shell: bash
+        run: |
+
+          set -e
+
+          rm -rf anykernel3/.git
+
+          mkdir -p anykernel3/kernel
+
+          # Select kernel image
+
+          if [ -f release/Image.gz-dtb ]; then
+
+            cp \
+              release/Image.gz-dtb \
+              anykernel3/kernel/Image.gz-dtb
+
+          elif [ -f release/Image.gz ]; then
+
+            cp \
+              release/Image.gz \
+              anykernel3/kernel/Image.gz
+
+          elif [ -f release/Image ]; then
+
+            cp \
+              release/Image \
+              anykernel3/kernel/Image
+
+          else
+
+            echo "::error::No kernel image found."
+
+            exit 1
+
+          fi
+
+
+      # ------------------------------------------------------
+      # Configure AnyKernel3
+      # ------------------------------------------------------
+
+      - name: Configure AnyKernel3
+        run: |
+
+          cat > anykernel3/anykernel.sh <<'EOF'
+
+          ### AnyKernel setup
+
+          properties() {
+          kernel.string=NetHunter Kernel - Samsung Galaxy S10+
+          do.devicecheck=1
+          do.modules=1
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=beyond2lte
+          device.name2=beyond2lteks
+          device.name3=beyond2lte
+          device.name4=exynos9820
+          supported.versions=
+          supported.patchlevels=
+          }
+
+          block=/dev/block/by-name/boot
+          is_slot_device=0
+
+          . tools/ak3-core.sh
+
+          dump_boot
+
+          if [ -f kernel/Image.gz-dtb ]; then
+              replace_kernel kernel/Image.gz-dtb
+          elif [ -f kernel/Image.gz ]; then
+              replace_kernel kernel/Image.gz
+          elif [ -f kernel/Image ]; then
+              replace_kernel kernel/Image
+          fi
+
+          # Samsung S10+ commonly uses vendor_boot / dtbo
+          # handling that can vary by ROM.
+          # Do not force-modify unknown partitions here.
+
+          create_boot
+
+          EOF
+
+
+      # ------------------------------------------------------
+      # Create AnyKernel3 ZIP
+      # ------------------------------------------------------
+
+      - name: Create AnyKernel3 ZIP
+        run: |
+
+          cd anykernel3
+
+          zip -r9 \
+            ../release/NetHunter-S10Plus-beyond2lte-AnyKernel3.zip \
+            . \
+            -x ".git/*"
+
+
+      # ======================================================
+      # RAW RELEASE PACKAGE
+      # ======================================================
+
+      - name: Create complete release ZIP
+        run: |
+
+          cd release
+
+          zip -r9 \
+            ../NetHunter-S10Plus-beyond2lte-Full.zip \
+            .
+
+
+      # ------------------------------------------------------
+      # Upload raw artifacts
+      # ------------------------------------------------------
+
+      - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
+
         with:
-          name: FreeRunnerKernel-Build-${{ github.run_id }}
+
+          name: NetHunter-S10Plus-beyond2lte
+
           path: |
-            *.zip
-            AnyKernel3/*.zip
-            out/**/*.zip
-          retention-days: 7
+            release/
+            NetHunter-S10Plus-beyond2lte-Full.zip
+
+          if-no-files-found: error
+
+          retention-days: 30
+
+
+      # ------------------------------------------------------
+      # Upload AnyKernel3 separately
+      # ------------------------------------------------------
+
+      - name: Upload AnyKernel3
+        uses: actions/upload-artifact@v4
+
+        with:
+
+          name: NetHunter-S10Plus-AnyKernel3
+
+          path: |
+            release/NetHunter-S10Plus-beyond2lte-AnyKernel3.zip
+
+          if-no-files-found: error
+
+          retention-days: 30
